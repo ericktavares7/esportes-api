@@ -1,24 +1,31 @@
 import { getRodada, getPartida } from './apiFutebolService.js';
+import { comCache } from '../db/cache.js';
 
 // Anda pelas rodadas anteriores até achar N jogos já encerrados do time,
-// depois busca o detalhe completo (com estatísticas) de cada um.
+// depois busca o detalhe completo (com estatísticas) de cada um. O resultado
+// agregado também fica em cache - assim, reabrir o comparativo do mesmo jogo
+// não repete nem a varredura de rodadas nem as chamadas de detalhe.
 export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade = 5) {
-  const jogosEncontrados = [];
-  let numero = antesRodada - 1;
+  const chave = `forma:${campeonatoId}:${timeId}:${antesRodada}:${quantidade}`;
 
-  while (numero >= 1 && jogosEncontrados.length < quantidade) {
-    const rodada = await getRodada(campeonatoId, numero);
-    const partidaDoTime = (rodada.partidas ?? []).find(
-      (p) => p.status === 'finalizado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
-    );
-    if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
-    numero -= 1;
-  }
+  return comCache(chave, 30 * 60, async () => {
+    const jogosEncontrados = [];
+    let numero = antesRodada - 1;
 
-  const detalhes = await Promise.all(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
-  const jogos = detalhes.map((partida) => montarLinhaForma(partida, timeId));
+    while (numero >= 1 && jogosEncontrados.length < quantidade) {
+      const rodada = await getRodada(campeonatoId, numero);
+      const partidaDoTime = (rodada.partidas ?? []).find(
+        (p) => p.status === 'finalizado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
+      );
+      if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
+      numero -= 1;
+    }
 
-  return { jogos, medias: calcularMedias(jogos) };
+    const detalhes = await Promise.all(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
+    const jogos = detalhes.map((partida) => montarLinhaForma(partida, timeId));
+
+    return { jogos, medias: calcularMedias(jogos) };
+  });
 }
 
 function montarLinhaForma(partida, timeId) {

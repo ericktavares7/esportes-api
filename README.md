@@ -43,12 +43,29 @@ Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a l
 - Médias comparadas em pílulas (posse de bola, gols, finalizações, chutes no gol, escanteios, impedimentos, faltas, cartões amarelos — a maior média de cada estatística fica destacada)
 - **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). É um modelo real e transparente — a fórmula e os "gols esperados" ficam visíveis — mas continua sendo uma estimativa a partir de poucos jogos, **não uma garantia de resultado**. O projeto não implementa nem vai implementar apostas ou qualquer manipulação de dinheiro.
 
+## Cache local (SQLite)
+
+Toda chamada à API Futebol passa primeiro por um cache em SQLite (`data/cache.sqlite`, criado automaticamente — usa o módulo `node:sqlite` nativo do Node, sem dependência extra). Padrão "cache-aside": se já existe uma cópia válida no banco, ela é usada; senão, busca na API real e salva com um prazo de validade.
+
+| Dado | Validade |
+|---|---|
+| Lista de campeonatos | 24 horas |
+| Tabela / artilharia | 1 hora |
+| Lista de rodadas | 6 horas |
+| Detalhe de uma rodada | 5 minutos |
+| Jogos ao vivo | 20 segundos |
+| Detalhe de uma partida | 1 minuto |
+| Forma recente de um time (agregado) | 30 minutos |
+
+Isso reduz muito o consumo da cota diária da API — essencial no plano Free (100 requisições/dia), já que o comparativo pré-jogo sozinho pode gerar dezenas de chamadas na primeira vez que é aberto. O terminal mostra `[cache] HIT`/`[cache] MISS` a cada chamada, pra acompanhar o que está vindo do cache. A pasta `data/` não vai pro Git (é gerada localmente).
+
 ## Estrutura do projeto
 
 ```
 src/
   config/env.js                    variáveis de ambiente
-  services/apiFutebolService.js    chamadas HTTP à API Futebol
+  db/cache.js                      cache local em SQLite (padrão cache-aside)
+  services/apiFutebolService.js    chamadas HTTP à API Futebol (passam pelo cache)
   services/formaService.js         calcula a forma recente (últimos N jogos) de um time
   controllers/matches.controller.js      lógica das rotas de partidas
   controllers/campeonatos.controller.js  lógica das rotas de campeonatos

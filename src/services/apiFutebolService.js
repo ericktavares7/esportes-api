@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { API_FUTEBOL_KEY, API_FUTEBOL_BASE_URL } from '../config/env.js';
+import { comCache } from '../db/cache.js';
 
 // Cliente axios pre-configurado: toda chamada feita com "api" ja sai
 // com a URL base e o token de autenticacao certos, sem repetir codigo.
@@ -10,37 +11,57 @@ const api = axios.create({
   },
 });
 
+// TTLs pensados pra cada tipo de dado: coisas que quase nao mudam (lista de
+// campeonatos) ficam em cache por muito tempo; coisas ao vivo, por poucos
+// segundos - o mesmo equilibrio que a documentacao da API Futebol recomenda.
+const UM_MINUTO = 60;
+const UMA_HORA = 60 * 60;
+
 export async function getCampeonatos() {
-  const { data } = await api.get('/campeonatos');
-  return data;
+  return comCache('campeonatos', 24 * UMA_HORA, async () => {
+    const { data } = await api.get('/campeonatos');
+    return data;
+  });
 }
 
 export async function getTabela(campeonatoId) {
-  const { data } = await api.get(`/campeonatos/${campeonatoId}/tabela`);
-  return data;
+  return comCache(`tabela:${campeonatoId}`, UMA_HORA, async () => {
+    const { data } = await api.get(`/campeonatos/${campeonatoId}/tabela`);
+    return data;
+  });
 }
 
 export async function getArtilharia(campeonatoId) {
-  const { data } = await api.get(`/campeonatos/${campeonatoId}/artilharia`);
-  return data;
+  return comCache(`artilharia:${campeonatoId}`, UMA_HORA, async () => {
+    const { data } = await api.get(`/campeonatos/${campeonatoId}/artilharia`);
+    return data;
+  });
 }
 
 export async function getRodadas(campeonatoId) {
-  const { data } = await api.get(`/campeonatos/${campeonatoId}/rodadas`);
-  return data;
+  return comCache(`rodadas:${campeonatoId}`, 6 * UMA_HORA, async () => {
+    const { data } = await api.get(`/campeonatos/${campeonatoId}/rodadas`);
+    return data;
+  });
 }
 
 export async function getRodada(campeonatoId, numero) {
-  const { data } = await api.get(`/campeonatos/${campeonatoId}/rodadas/${numero}`);
-  return data;
+  return comCache(`rodada:${campeonatoId}:${numero}`, 5 * UM_MINUTO, async () => {
+    const { data } = await api.get(`/campeonatos/${campeonatoId}/rodadas/${numero}`);
+    return data;
+  });
 }
 
 export async function getAoVivo() {
-  const { data } = await api.get('/ao-vivo');
-  return data;
+  return comCache('ao-vivo', 20, async () => {
+    const { data } = await api.get('/ao-vivo');
+    return data;
+  });
 }
 
 export async function getPartida(partidaId) {
-  const { data } = await api.get(`/partidas/${partidaId}`);
-  return data;
+  return comCache(`partida:${partidaId}`, UM_MINUTO, async () => {
+    const { data } = await api.get(`/partidas/${partidaId}`);
+    return data;
+  });
 }
