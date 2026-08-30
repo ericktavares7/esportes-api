@@ -1,0 +1,1040 @@
+const campeonatoSelect = document.getElementById('campeonato-select');
+const tabelaBody = document.getElementById('tabela-body');
+const aoVivoLista = document.getElementById('ao-vivo-lista');
+const artilhariaLista = document.getElementById('artilharia-lista');
+const modalOverlay = document.getElementById('modal-overlay');
+const modalContent = document.getElementById('modal-content');
+const jogosLista = document.getElementById('jogos-lista');
+const rodadaTitulo = document.getElementById('rodada-titulo');
+const btnRodadaAnterior = document.getElementById('rodada-anterior');
+const btnRodadaProxima = document.getElementById('rodada-proxima');
+const quantidadeSelect = document.getElementById('quantidade-select');
+
+let rodadaExibida = null;
+
+// Anima a entrada de cards/linhas conforme eles aparecem na tela ao rolar.
+const revelarObserver = new IntersectionObserver((entradas) => {
+  entradas.forEach((entrada) => {
+    if (entrada.isIntersecting) {
+      entrada.target.classList.add('visivel');
+      revelarObserver.unobserve(entrada.target);
+    }
+  });
+}, { threshold: 0.1 });
+
+function comRevelacao(elemento) {
+  elemento.classList.add('reveal');
+  revelarObserver.observe(elemento);
+  return elemento;
+}
+
+async function fetchJSON(url) {
+  const resposta = await fetch(url);
+  if (!resposta.ok) {
+    const corpo = await resposta.json().catch(() => null);
+    const detalhe = corpo?.detail ?? corpo?.error ?? `HTTP ${resposta.status}`;
+    throw new Error(typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe));
+  }
+  return resposta.json();
+}
+
+// --- Campeonatos disponíveis (depende do plano/chave em uso) ---
+
+async function carregarCampeonatosSelect() {
+  let campeonatos;
+  try {
+    campeonatos = await fetchJSON('/api/campeonatos');
+  } catch (err) {
+    campeonatoSelect.replaceChildren();
+    const option = document.createElement('option');
+    option.textContent = 'Erro ao carregar campeonatos';
+    campeonatoSelect.appendChild(option);
+    campeonatoSelect.disabled = true;
+
+    jogosLista.replaceChildren();
+    rodadaTitulo.textContent = '';
+    jogosLista.appendChild(linhaVazia(`Não foi possível carregar os campeonatos: ${err.message}`));
+    return false;
+  }
+
+  campeonatoSelect.replaceChildren();
+
+  if (campeonatos.length === 0) {
+    const option = document.createElement('option');
+    option.textContent = 'Nenhum campeonato disponível no seu plano';
+    campeonatoSelect.appendChild(option);
+    campeonatoSelect.disabled = true;
+    return false;
+  }
+
+  campeonatoSelect.disabled = false;
+  campeonatos.forEach((campeonato) => {
+    const option = document.createElement('option');
+    option.value = campeonato.campeonato_id;
+    option.textContent = campeonato.nome_popular;
+    campeonatoSelect.appendChild(option);
+  });
+  return true;
+}
+
+// --- Tabs ---
+
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+
+    if (btn.dataset.tab === 'jogos') carregarJogos();
+    if (btn.dataset.tab === 'tabela') carregarTabela();
+    if (btn.dataset.tab === 'ao-vivo') carregarAoVivo();
+    if (btn.dataset.tab === 'artilharia') carregarArtilharia();
+  });
+});
+
+campeonatoSelect.addEventListener('change', () => {
+  rodadaExibida = null;
+  carregarJogos();
+  carregarTabela();
+  carregarArtilharia();
+});
+
+// --- Jogos por rodada / data ---
+
+async function carregarJogos(numeroRodada) {
+  jogosLista.replaceChildren();
+  rodadaTitulo.textContent = 'Carregando...';
+  btnRodadaAnterior.disabled = true;
+  btnRodadaProxima.disabled = true;
+
+  const campeonatoId = campeonatoSelect.value;
+
+  try {
+    if (numeroRodada == null) {
+      const campeonatos = await fetchJSON('/api/campeonatos');
+      const atual = campeonatos.find((c) => String(c.campeonato_id) === campeonatoId);
+      numeroRodada = atual?.rodada_atual?.rodada;
+    }
+
+    if (numeroRodada == null) {
+      rodadaTitulo.textContent = '';
+      jogosLista.appendChild(linhaVazia('Este campeonato é disputado em fases de mata-mata, sem rodadas sequenciais.'));
+      return;
+    }
+
+    const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
+    rodadaExibida = rodada.rodada;
+
+    rodadaTitulo.textContent = rodada.nome;
+    btnRodadaAnterior.disabled = !rodada.rodada_anterior;
+    btnRodadaProxima.disabled = !rodada.proxima_rodada;
+
+    renderJogosPorData(rodada.partidas ?? []);
+  } catch (err) {
+    rodadaTitulo.textContent = '';
+    jogosLista.appendChild(linhaVazia(`Não foi possível carregar os jogos: ${err.message}`));
+  }
+}
+
+btnRodadaAnterior.addEventListener('click', async () => {
+  try {
+    const campeonatoId = campeonatoSelect.value;
+    const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${rodadaExibida}`);
+    if (rodada.rodada_anterior) carregarJogos(rodada.rodada_anterior.rodada);
+  } catch (err) {
+    jogosLista.appendChild(linhaVazia(`Não foi possível trocar de rodada: ${err.message}`));
+  }
+});
+
+btnRodadaProxima.addEventListener('click', async () => {
+  try {
+    const campeonatoId = campeonatoSelect.value;
+    const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${rodadaExibida}`);
+    if (rodada.proxima_rodada) carregarJogos(rodada.proxima_rodada.rodada);
+  } catch (err) {
+    jogosLista.appendChild(linhaVazia(`Não foi possível trocar de rodada: ${err.message}`));
+  }
+});
+
+function formatarData(dataIso) {
+  const data = new Date(dataIso);
+  const texto = data.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
+  return texto.charAt(0).toUpperCase() + texto.slice(1).replace('.', '');
+}
+
+function situacaoJogo(partida) {
+  if (partida.status === 'andamento') {
+    return { texto: `${partida.cronometro}'`, classe: 'andamento' };
+  }
+  if (partida.status === 'finalizado' || partida.status === 'encerrada') {
+    return { texto: partida.placar_mandante + ' x ' + partida.placar_visitante, classe: 'encerrada' };
+  }
+  return { texto: 'AGENDADA', classe: '' };
+}
+
+function renderJogosPorData(partidas) {
+  jogosLista.replaceChildren();
+
+  if (partidas.length === 0) {
+    jogosLista.appendChild(linhaVazia('Sem jogos cadastrados nesta rodada.'));
+    return;
+  }
+
+  const grupos = new Map();
+  partidas.forEach((partida) => {
+    const chave = partida.data_realizacao;
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(partida);
+  });
+
+  grupos.forEach((jogosDoDia, dataChave) => {
+    const grupo = document.createElement('div');
+    grupo.className = 'data-grupo';
+
+    const cabecalho = document.createElement('div');
+    cabecalho.className = 'data-cabecalho';
+    cabecalho.textContent = formatarData(jogosDoDia[0].data_realizacao_iso ?? dataChave);
+    grupo.appendChild(cabecalho);
+
+    jogosDoDia.forEach((partida) => {
+      grupo.appendChild(criarLinhaJogo(partida));
+    });
+
+    jogosLista.appendChild(grupo);
+  });
+}
+
+function criarLinhaJogo(partida) {
+  const linha = document.createElement('div');
+  linha.className = 'jogo-linha';
+  comRevelacao(linha);
+  linha.addEventListener('click', () => {
+    if (partida.status === 'agendado') {
+      abrirFormaPreJogo(partida);
+    } else {
+      abrirResumo(partida.partida_id);
+    }
+  });
+
+  const horario = document.createElement('span');
+  horario.className = 'horario';
+  horario.textContent = partida.hora_realizacao ?? '';
+
+  const confrontos = document.createElement('div');
+  confrontos.className = 'confrontos';
+  confrontos.appendChild(timeLinhaJogos(partida.time_mandante));
+  confrontos.appendChild(timeLinhaJogos(partida.time_visitante));
+
+  const situacao = situacaoJogo(partida);
+  const situacaoEl = document.createElement('span');
+  situacaoEl.className = `situacao ${situacao.classe}`;
+  situacaoEl.textContent = situacao.texto;
+
+  linha.append(horario, confrontos, situacaoEl);
+  return linha;
+}
+
+function timeLinhaJogos(time) {
+  const linha = document.createElement('div');
+  linha.className = 'time-linha';
+  const img = document.createElement('img');
+  img.src = time.escudo;
+  img.alt = '';
+  const nome = document.createElement('span');
+  nome.textContent = time.nome_popular;
+  linha.append(img, nome);
+  return linha;
+}
+
+// --- Tabela ---
+
+async function carregarTabela() {
+  tabelaBody.replaceChildren();
+  const campeonatoId = campeonatoSelect.value;
+
+  let linhas;
+  try {
+    linhas = await fetchJSON(`/api/campeonatos/${campeonatoId}/tabela`);
+  } catch (err) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 8;
+    td.className = 'vazio';
+    td.textContent = `Não foi possível carregar a tabela: ${err.message}`;
+    tr.appendChild(td);
+    tabelaBody.appendChild(tr);
+    return;
+  }
+
+  linhas.forEach((linha) => {
+    const tr = document.createElement('tr');
+    tr.className = linha.faixa_classificacao ?? '';
+
+    tr.appendChild(celula(linha.posicao));
+
+    const tdTime = document.createElement('td');
+    const wrap = document.createElement('div');
+    wrap.className = 'time-cell';
+    const img = document.createElement('img');
+    img.src = linha.time.escudo;
+    img.alt = '';
+    const nome = document.createElement('span');
+    nome.textContent = linha.time.nome_popular;
+    wrap.append(img, nome);
+    tdTime.appendChild(wrap);
+    tr.appendChild(tdTime);
+
+    tr.appendChild(celula(linha.pontos));
+    tr.appendChild(celula(linha.jogos));
+    tr.appendChild(celula(linha.vitorias));
+    tr.appendChild(celula(linha.empates));
+    tr.appendChild(celula(linha.derrotas));
+    tr.appendChild(celula(linha.saldo_gols));
+
+    tabelaBody.appendChild(comRevelacao(tr));
+  });
+}
+
+function celula(valor) {
+  const td = document.createElement('td');
+  td.textContent = valor;
+  return td;
+}
+
+// --- Ao vivo ---
+
+async function carregarAoVivo() {
+  aoVivoLista.replaceChildren();
+
+  let partidas;
+  try {
+    partidas = await fetchJSON('/api/matches/live');
+  } catch (err) {
+    aoVivoLista.appendChild(linhaVazia(`Não foi possível carregar os jogos ao vivo: ${err.message}`));
+    return;
+  }
+
+  if (partidas.length === 0) {
+    const vazio = document.createElement('p');
+    vazio.className = 'vazio';
+    vazio.textContent = 'Nenhuma partida ao vivo neste momento.';
+    aoVivoLista.appendChild(vazio);
+    return;
+  }
+
+  partidas.forEach((partida) => {
+    aoVivoLista.appendChild(comRevelacao(criarCardJogo(partida)));
+  });
+}
+
+function statusLabel(partida) {
+  if (partida.status === 'andamento') {
+    const periodo = (partida.periodo ?? '').replace(/-/g, ' ');
+    return `${periodo} · ${partida.cronometro}'`.toUpperCase();
+  }
+  return (partida.status ?? '').toUpperCase();
+}
+
+function criarCardJogo(partida) {
+  const card = document.createElement('div');
+  card.className = 'jogo-card';
+  card.addEventListener('click', () => abrirResumo(partida.partida_id));
+
+  const status = document.createElement('div');
+  status.className = 'status';
+  status.textContent = statusLabel(partida);
+  card.appendChild(status);
+
+  card.appendChild(linhaTime(partida.time_mandante, partida.placar_mandante));
+  card.appendChild(linhaTime(partida.time_visitante, partida.placar_visitante));
+
+  const estadio = document.createElement('div');
+  estadio.className = 'estadio';
+  estadio.textContent = partida.estadio?.nome_popular ?? '';
+  card.appendChild(estadio);
+
+  return card;
+}
+
+function linhaTime(time, placar) {
+  const linha = document.createElement('div');
+  linha.className = 'confronto-linha';
+
+  const img = document.createElement('img');
+  img.src = time.escudo;
+  img.alt = '';
+
+  const nome = document.createElement('span');
+  nome.className = 'nome';
+  nome.textContent = time.nome_popular;
+
+  const placarEl = document.createElement('span');
+  placarEl.className = 'placar';
+  placarEl.textContent = placar;
+
+  linha.append(img, nome, placarEl);
+  return linha;
+}
+
+// --- Artilharia ---
+
+async function carregarArtilharia() {
+  artilhariaLista.replaceChildren();
+  const campeonatoId = campeonatoSelect.value;
+
+  let artilheiros;
+  try {
+    artilheiros = await fetchJSON(`/api/campeonatos/${campeonatoId}/artilharia`);
+  } catch (err) {
+    artilhariaLista.appendChild(linhaVazia(`Não foi possível carregar a artilharia: ${err.message}`));
+    return;
+  }
+
+  artilheiros.forEach((item) => {
+    const li = document.createElement('li');
+
+    const img = document.createElement('img');
+    img.src = item.time.escudo;
+    img.alt = '';
+
+    const nome = document.createElement('span');
+    nome.className = 'nome';
+    nome.textContent = `${item.atleta.nome_popular} — ${item.time.nome_popular}`;
+
+    const gols = document.createElement('span');
+    gols.className = 'gols';
+    gols.textContent = `${item.gols} gols`;
+
+    li.append(img, nome, gols);
+    artilhariaLista.appendChild(comRevelacao(li));
+  });
+}
+
+// --- Modal de forma recente (pré-jogo, para partidas ainda não realizadas) ---
+
+const FAIXA_LABELS = {
+  rebaixados: 'Rebaixamento',
+  libertadores: 'Libertadores',
+  'pre-libertadores': 'Pré-Libertadores',
+  'sul-americana': 'Sul-Americana',
+  'acesso-serie-a': 'Acesso à Série A',
+  'playoffs-de-acesso': 'Playoff de acesso',
+  'rebaixados-serie-c': 'Rebaixamento',
+};
+
+async function abrirFormaPreJogo(partida) {
+  modalContent.replaceChildren();
+  modalOverlay.classList.add('active');
+
+  const campeonatoId = campeonatoSelect.value;
+  const antes = rodadaExibida;
+  const quantidade = quantidadeSelect.value;
+
+  const cabecalho = document.createElement('div');
+  cabecalho.className = 'resumo-placar';
+  const times = document.createElement('div');
+  times.className = 'times';
+  times.textContent = `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular}`;
+  const subtitulo = document.createElement('div');
+  subtitulo.className = 'forma-subtitulo';
+  subtitulo.textContent = `Últimos ${quantidade} jogos — não é previsão de resultado`;
+  cabecalho.append(times, subtitulo);
+  modalContent.appendChild(cabecalho);
+
+  const [formaMandante, formaVisitante, tabela] = await Promise.all([
+    fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
+    fetchJSON(`/api/times/${partida.time_visitante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
+    fetchJSON(`/api/campeonatos/${campeonatoId}/tabela`),
+  ]);
+
+  const linhaMandante = tabela.find((l) => l.time.time_id === partida.time_mandante.time_id);
+  const linhaVisitante = tabela.find((l) => l.time.time_id === partida.time_visitante.time_id);
+
+  const tagsRow = document.createElement('div');
+  tagsRow.className = 'forma-tags-linha';
+  tagsRow.appendChild(tagContexto(linhaMandante, formaMandante.medias));
+  tagsRow.appendChild(tagContexto(linhaVisitante, formaVisitante.medias));
+  modalContent.appendChild(tagsRow);
+
+  modalContent.appendChild(linhaResultados(partida.time_mandante.nome_popular, formaMandante.jogos));
+  modalContent.appendChild(linhaResultados(partida.time_visitante.nome_popular, formaVisitante.jogos));
+
+  if (!formaMandante.medias || !formaVisitante.medias) {
+    modalContent.appendChild(linhaVazia('Sem jogos anteriores suficientes para montar o comparativo.'));
+    return;
+  }
+
+  modalContent.appendChild(
+    secaoComparativoMedias(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, formaMandante.medias, formaVisitante.medias),
+  );
+
+  modalContent.appendChild(
+    secaoProbabilidade(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, formaMandante.medias, formaVisitante.medias),
+  );
+}
+
+// Sinais curtos de estilo de jogo, derivados das médias reais — sem prosa,
+// só os 2 traços mais fora da média (limiares fixos, mesmos de antes).
+function sinaisPerfil(medias) {
+  const sinais = [];
+  const push = (condicao, texto, prioridade) => {
+    if (condicao) sinais.push({ texto, prioridade });
+  };
+
+  push(medias.mediaFinalizacoes >= 13, 'Ataque volumoso', Math.abs(medias.mediaFinalizacoes - 11));
+  push(medias.mediaFinalizacoes <= 8, 'Pouco ofensivo', Math.abs(medias.mediaFinalizacoes - 11));
+  push(medias.mediaPosseDeBola >= 55, 'Domina a posse', Math.abs(medias.mediaPosseDeBola - 50));
+  push(medias.mediaPosseDeBola <= 45, 'Contra-ataque', Math.abs(medias.mediaPosseDeBola - 50));
+  push(medias.mediaFaltas >= 14, 'Jogo físico', Math.abs(medias.mediaFaltas - 11));
+  push(medias.mediaFaltas <= 8, 'Poucas faltas', Math.abs(medias.mediaFaltas - 11));
+  push(medias.mediaChutesNoGol >= 6, 'Finalização certeira', Math.abs(medias.mediaChutesNoGol - 4));
+  push(medias.mediaChutesNoGol <= 3, 'Pouco incisivo', Math.abs(medias.mediaChutesNoGol - 4));
+
+  return sinais
+    .sort((a, b) => b.prioridade - a.prioridade)
+    .slice(0, 2)
+    .map((s) => s.texto);
+}
+
+function tagContexto(linhaTabela, medias) {
+  const tag = document.createElement('div');
+  tag.className = 'forma-tag';
+
+  if (!linhaTabela && !medias) {
+    tag.textContent = '—';
+    return tag;
+  }
+
+  if (linhaTabela) {
+    const posicao = document.createElement('span');
+    posicao.className = 'forma-tag-posicao';
+    posicao.textContent = `${linhaTabela.posicao}º · ${linhaTabela.pontos} pts`;
+    tag.appendChild(posicao);
+
+    const zona = FAIXA_LABELS[linhaTabela.faixa_classificacao];
+    if (zona) {
+      const selo = document.createElement('span');
+      selo.className = `forma-tag-selo ${linhaTabela.faixa_classificacao}`;
+      selo.textContent = zona;
+      tag.appendChild(selo);
+    }
+  }
+
+  if (medias) {
+    sinaisPerfil(medias).forEach((texto) => {
+      const chip = document.createElement('span');
+      chip.className = 'forma-tag-chip';
+      chip.textContent = texto;
+      tag.appendChild(chip);
+    });
+  }
+
+  return tag;
+}
+
+function linhaResultados(nomeTime, jogos) {
+  const linha = document.createElement('div');
+  linha.className = 'forma-resultados-linha';
+
+  const nome = document.createElement('span');
+  nome.className = 'forma-resultados-nome';
+  nome.textContent = nomeTime;
+  linha.appendChild(nome);
+
+  const badges = document.createElement('div');
+  badges.className = 'forma-resultados';
+  [...jogos].reverse().forEach((jogo) => {
+    const badge = document.createElement('span');
+    badge.className = `resultado-badge ${jogo.resultado}`;
+    badge.textContent = jogo.resultado;
+    badge.title = `${jogo.mandante ? 'vs' : '@'} ${jogo.adversario} — ${jogo.placar}`;
+    badges.appendChild(badge);
+  });
+  linha.appendChild(badges);
+
+  return linha;
+}
+
+const LINHAS_COMPARATIVO = [
+  ['Aproveitamento', 'aproveitamento', '%'],
+  ['Gols marcados', 'mediaGolsPro', ''],
+  ['Gols sofridos', 'mediaGolsContra', ''],
+  ['Finalizações', 'mediaFinalizacoes', ''],
+  ['Chutes no gol', 'mediaChutesNoGol', ''],
+  ['Escanteios', 'mediaEscanteios', ''],
+  ['Impedimentos', 'mediaImpedimentos', ''],
+  ['Faltas cometidas', 'mediaFaltas', ''],
+  ['Cartões amarelos', 'mediaCartoesAmarelos', ''],
+];
+
+function secaoComparativoMedias(nomeMandante, nomeVisitante, mediasMandante, mediasVisitante) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+
+  const card = document.createElement('div');
+  card.className = 'stats-card';
+
+  const teamsRow = document.createElement('div');
+  teamsRow.className = 'stats-teams';
+  const nomeM = document.createElement('span');
+  nomeM.textContent = nomeMandante;
+  const nomeV = document.createElement('span');
+  nomeV.textContent = nomeVisitante;
+  teamsRow.append(nomeM, nomeV);
+  card.appendChild(teamsRow);
+
+  card.appendChild(
+    criarBarraComparativa('Posse de bola (média)', mediasMandante.mediaPosseDeBola, mediasVisitante.mediaPosseDeBola, '%'),
+  );
+
+  LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
+    card.appendChild(criarStatRow({ label, m: mediasMandante[campo], v: mediasVisitante[campo], sufixo }));
+  });
+
+  secao.appendChild(card);
+  return secao;
+}
+
+// --- Estimativa estatística (modelo de Poisson simplificado) ---
+//
+// Técnica clássica de análise esportiva: usa a média de gols marcados de um
+// time e a média de gols sofridos do adversário pra estimar um "gols esperados"
+// (xG simplificado), e a distribuição de Poisson pra transformar isso numa
+// probabilidade de vitória/empate/derrota. É um modelo real e transparente,
+// mas continua sendo uma ESTIMATIVA a partir de poucos jogos — não uma garantia.
+
+function fatorial(n) {
+  let resultado = 1;
+  for (let i = 2; i <= n; i++) resultado *= i;
+  return resultado;
+}
+
+function poisson(lambda, k) {
+  return (Math.exp(-lambda) * lambda ** k) / fatorial(k);
+}
+
+function estimarProbabilidades(mediasMandante, mediasVisitante) {
+  const xgMandante = (mediasMandante.mediaGolsPro + mediasVisitante.mediaGolsContra) / 2;
+  const xgVisitante = (mediasVisitante.mediaGolsPro + mediasMandante.mediaGolsContra) / 2;
+
+  let vitoriaMandante = 0;
+  let empate = 0;
+  let vitoriaVisitante = 0;
+
+  for (let i = 0; i <= 8; i++) {
+    for (let j = 0; j <= 8; j++) {
+      const probabilidade = poisson(xgMandante, i) * poisson(xgVisitante, j);
+      if (i > j) vitoriaMandante += probabilidade;
+      else if (i === j) empate += probabilidade;
+      else vitoriaVisitante += probabilidade;
+    }
+  }
+
+  const total = vitoriaMandante + empate + vitoriaVisitante;
+  const valores = [
+    Math.round((vitoriaMandante / total) * 100),
+    Math.round((empate / total) * 100),
+    Math.round((vitoriaVisitante / total) * 100),
+  ];
+
+  // Ajusta o arredondamento pra somar exatamente 100%.
+  const diferenca = 100 - (valores[0] + valores[1] + valores[2]);
+  valores[valores.indexOf(Math.max(...valores))] += diferenca;
+
+  return {
+    vitoriaMandante: valores[0],
+    empate: valores[1],
+    vitoriaVisitante: valores[2],
+    xgMandante: Math.round(xgMandante * 10) / 10,
+    xgVisitante: Math.round(xgVisitante * 10) / 10,
+  };
+}
+
+function secaoProbabilidade(nomeMandante, nomeVisitante, mediasMandante, mediasVisitante) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Estimativa estatística';
+  secao.appendChild(titulo);
+
+  const estimativa = estimarProbabilidades(mediasMandante, mediasVisitante);
+
+  const card = document.createElement('div');
+  card.className = 'prob-card';
+
+  const barra = document.createElement('div');
+  barra.className = 'prob-bar';
+  barra.appendChild(criarSegmentoProb('mandante', estimativa.vitoriaMandante));
+  barra.appendChild(criarSegmentoProb('empate', estimativa.empate));
+  barra.appendChild(criarSegmentoProb('visitante', estimativa.vitoriaVisitante));
+  card.appendChild(barra);
+
+  const legenda = document.createElement('div');
+  legenda.className = 'prob-legenda';
+  [
+    ['mandante', nomeMandante],
+    ['empate', 'Empate'],
+    ['visitante', nomeVisitante],
+  ].forEach(([tipo, nome]) => {
+    const item = document.createElement('span');
+    item.className = 'prob-legenda-item';
+    const bolinha = document.createElement('span');
+    bolinha.className = `prob-dot prob-dot-${tipo}`;
+    item.append(bolinha, document.createTextNode(nome));
+    legenda.appendChild(item);
+  });
+  card.appendChild(legenda);
+
+  const nota = document.createElement('p');
+  nota.className = 'prob-nota';
+  nota.textContent =
+    `Modelo Poisson a partir da média de gols pró/contra dos últimos jogos ` +
+    `(gols esperados: ${nomeMandante} ${estimativa.xgMandante} x ${estimativa.xgVisitante} ${nomeVisitante}). ` +
+    `Estimativa estatística — não é garantia de resultado.`;
+  card.appendChild(nota);
+
+  secao.appendChild(card);
+  return secao;
+}
+
+function criarSegmentoProb(tipo, valor) {
+  const seg = document.createElement('div');
+  seg.className = `prob-seg prob-seg-${tipo}`;
+  seg.style.width = `${valor}%`;
+  seg.textContent = `${valor}%`;
+  return seg;
+}
+
+// --- Modal de resumo ---
+
+async function abrirResumo(partidaId) {
+  modalContent.replaceChildren();
+  modalOverlay.classList.add('active');
+
+  const resumo = await fetchJSON(`/api/matches/${partidaId}/summary`);
+
+  const placarBloco = document.createElement('div');
+  placarBloco.className = 'resumo-placar';
+  const times = document.createElement('div');
+  times.className = 'times';
+  times.textContent = `${resumo.confronto.mandante} x ${resumo.confronto.visitante}`;
+  const placarGrande = document.createElement('div');
+  placarGrande.className = 'placar-grande';
+  placarGrande.textContent = resumo.confronto.placar;
+  placarBloco.append(times, placarGrande);
+  modalContent.appendChild(placarBloco);
+
+  modalContent.appendChild(secaoInformacoes(resumo));
+  modalContent.appendChild(secaoGols(resumo.gols));
+  modalContent.appendChild(secaoCartoes(resumo.cartoes));
+  modalContent.appendChild(secaoEstatisticas(resumo.estatisticas, resumo.confronto.mandante, resumo.confronto.visitante));
+}
+
+function secaoInformacoes(resumo) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Informações sobre a partida';
+  secao.appendChild(titulo);
+
+  const card = document.createElement('div');
+  card.className = 'info-card';
+
+  const tecnicoMandante = resumo.escalacoes?.mandante?.tecnico?.nome_popular;
+  const tecnicoVisitante = resumo.escalacoes?.visitante?.tecnico?.nome_popular;
+
+  const linhas = [
+    ['Competição', resumo.partida.campeonato ?? '—'],
+    ['Estádio', resumo.partida.estadio ?? '—'],
+    ['Rodada', resumo.partida.rodada ?? '—'],
+    [`Técnico ${resumo.confronto.mandante}`, tecnicoMandante ?? '—'],
+    [`Técnico ${resumo.confronto.visitante}`, tecnicoVisitante ?? '—'],
+  ];
+
+  linhas.forEach(([label, valor]) => {
+    const row = document.createElement('div');
+    row.className = 'info-row';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'label';
+    labelEl.textContent = label;
+    const valorEl = document.createElement('span');
+    valorEl.className = 'valor';
+    valorEl.textContent = valor;
+    row.append(labelEl, valorEl);
+    card.appendChild(row);
+  });
+
+  secao.appendChild(card);
+  return secao;
+}
+
+function secaoGols(gols) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Gols';
+  secao.appendChild(titulo);
+
+  const todos = [
+    ...gols.mandante.map((g) => ({ ...g, lado: 'mandante' })),
+    ...gols.visitante.map((g) => ({ ...g, lado: 'visitante' })),
+  ].sort((a, b) => a.minuto.localeCompare(b.minuto));
+
+  if (todos.length === 0) {
+    secao.appendChild(linhaVazia('Sem gols registrados.'));
+  }
+
+  todos.forEach((gol) => {
+    const linha = document.createElement('div');
+    linha.className = 'evento-linha';
+    const minuto = document.createElement('span');
+    minuto.className = 'minuto';
+    minuto.textContent = gol.minuto;
+    const texto = document.createElement('span');
+    texto.textContent = `${gol.atleta.nome_popular}${gol.penalti ? ' (pênalti)' : ''}${gol.gol_contra ? ' (contra)' : ''}`;
+    linha.append(minuto, texto);
+    secao.appendChild(linha);
+  });
+
+  return secao;
+}
+
+function secaoCartoes(cartoes) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Cartões';
+  secao.appendChild(titulo);
+
+  const todos = [
+    ...cartoes.amarelo.mandante.map((c) => ({ ...c, tipo: 'Amarelo' })),
+    ...cartoes.amarelo.visitante.map((c) => ({ ...c, tipo: 'Amarelo' })),
+    ...cartoes.vermelho.mandante.map((c) => ({ ...c, tipo: 'Vermelho' })),
+    ...cartoes.vermelho.visitante.map((c) => ({ ...c, tipo: 'Vermelho' })),
+  ];
+
+  if (todos.length === 0) {
+    secao.appendChild(linhaVazia('Sem cartões registrados.'));
+  }
+
+  todos.forEach((cartao) => {
+    const linha = document.createElement('div');
+    linha.className = 'evento-linha';
+    const minuto = document.createElement('span');
+    minuto.className = 'minuto';
+    minuto.textContent = cartao.minuto ?? '';
+    const texto = document.createElement('span');
+    texto.textContent = `${cartao.tipo} — ${cartao.atleta?.nome_popular ?? ''}`;
+    linha.append(minuto, texto);
+    secao.appendChild(linha);
+  });
+
+  return secao;
+}
+
+function linhaVazia(texto) {
+  const p = document.createElement('p');
+  p.className = 'vazio';
+  p.textContent = texto;
+  return p;
+}
+
+function parsePercentual(valor) {
+  return parseInt(valor, 10) || 0;
+}
+
+const CATEGORIAS_STATS = {
+  principais: 'Principais',
+  finalizacoes: 'Finalizações',
+  passes: 'Passes',
+  defesa: 'Defesa',
+};
+
+function linhasPorCategoria(chave, estatisticas) {
+  const m = estatisticas.mandante;
+  const v = estatisticas.visitante;
+
+  const mapa = {
+    principais: [
+      { label: 'Finalizações', m: m.finalizacao.total, v: v.finalizacao.total },
+      { label: 'Chutes no gol', m: m.finalizacao.no_gol, v: v.finalizacao.no_gol },
+      { label: 'Escanteios', m: m.escanteios, v: v.escanteios },
+      { label: 'Faltas cometidas', m: m.faltas, v: v.faltas },
+      { label: 'Impedimentos', m: m.impedimentos, v: v.impedimentos },
+    ],
+    finalizacoes: [
+      { label: 'Finalizações totais', m: m.finalizacao.total, v: v.finalizacao.total },
+      { label: 'No gol', m: m.finalizacao.no_gol, v: v.finalizacao.no_gol },
+      { label: 'Para fora', m: m.finalizacao.pra_fora, v: v.finalizacao.pra_fora },
+      { label: 'Na trave', m: m.finalizacao.na_trave, v: v.finalizacao.na_trave },
+      { label: 'Bloqueadas', m: m.finalizacao.bloqueado, v: v.finalizacao.bloqueado },
+      {
+        label: 'Precisão de finalização',
+        m: parsePercentual(m.finalizacao.precisao),
+        v: parsePercentual(v.finalizacao.precisao),
+        sufixo: '%',
+      },
+    ],
+    passes: [
+      { label: 'Passes totais', m: m.passes.total, v: v.passes.total },
+      { label: 'Passes completos', m: m.passes.completos, v: v.passes.completos },
+      { label: 'Passes errados', m: m.passes.errados, v: v.passes.errados },
+      {
+        label: 'Precisão de passe',
+        m: parsePercentual(m.passes.precisao),
+        v: parsePercentual(v.passes.precisao),
+        sufixo: '%',
+      },
+    ],
+    defesa: [
+      { label: 'Desarmes', m: m.desarmes, v: v.desarmes },
+      { label: 'Defesas do goleiro', m: m.defensivo.defesas, v: v.defensivo.defesas },
+      { label: 'Faltas cometidas', m: m.faltas, v: v.faltas },
+      { label: 'Impedimentos', m: m.impedimentos, v: v.impedimentos },
+    ],
+  };
+
+  return mapa[chave];
+}
+
+function criarBarraComparativa(labelTexto, valorM, valorV, sufixo = '') {
+  const wrap = document.createElement('div');
+
+  const label = document.createElement('div');
+  label.className = 'posse-bar-label';
+  label.textContent = labelTexto;
+
+  const barra = document.createElement('div');
+  barra.className = 'posse-bar';
+
+  const ladoM = document.createElement('div');
+  ladoM.className = 'lado mandante-lado';
+  ladoM.style.width = `${valorM}%`;
+  ladoM.textContent = `${valorM}${sufixo}`;
+
+  const ladoV = document.createElement('div');
+  ladoV.className = 'lado visitante-lado';
+  ladoV.style.width = `${valorV}%`;
+  ladoV.textContent = `${valorV}${sufixo}`;
+
+  barra.append(ladoM, ladoV);
+  wrap.append(label, barra);
+  return wrap;
+}
+
+function criarBarraPosse(estatisticas) {
+  const wrap = document.createElement('div');
+
+  const label = document.createElement('div');
+  label.className = 'posse-bar-label';
+  label.textContent = 'Posse de bola';
+
+  const m = parsePercentual(estatisticas.mandante.posse_de_bola);
+  const v = parsePercentual(estatisticas.visitante.posse_de_bola);
+
+  const barra = document.createElement('div');
+  barra.className = 'posse-bar';
+
+  const ladoM = document.createElement('div');
+  ladoM.className = 'lado mandante-lado';
+  ladoM.style.width = `${m}%`;
+  ladoM.textContent = `${m}%`;
+
+  const ladoV = document.createElement('div');
+  ladoV.className = 'lado visitante-lado';
+  ladoV.style.width = `${v}%`;
+  ladoV.textContent = `${v}%`;
+
+  barra.append(ladoM, ladoV);
+  wrap.append(label, barra);
+  return wrap;
+}
+
+function criarStatRow({ label, m, v, sufixo = '' }) {
+  const linha = document.createElement('div');
+  linha.className = 'stat-row';
+
+  const pillM = document.createElement('span');
+  pillM.className = 'stat-pill' + (m > v ? ' lead-mandante' : '');
+  pillM.textContent = `${m}${sufixo}`;
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'label';
+  labelEl.textContent = label;
+
+  const pillV = document.createElement('span');
+  pillV.className = 'stat-pill' + (v > m ? ' lead-visitante' : '');
+  pillV.textContent = `${v}${sufixo}`;
+
+  linha.append(pillM, labelEl, pillV);
+  return linha;
+}
+
+function secaoEstatisticas(estatisticas, nomeMandante, nomeVisitante) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Estatísticas';
+  secao.appendChild(titulo);
+
+  const card = document.createElement('div');
+  card.className = 'stats-card';
+
+  const tabsWrap = document.createElement('div');
+  tabsWrap.className = 'stats-tabs';
+
+  const teamsRow = document.createElement('div');
+  teamsRow.className = 'stats-teams';
+  const nomeM = document.createElement('span');
+  nomeM.textContent = nomeMandante;
+  const nomeV = document.createElement('span');
+  nomeV.textContent = nomeVisitante;
+  teamsRow.append(nomeM, nomeV);
+
+  const corpo = document.createElement('div');
+
+  function renderCorpo(chave) {
+    corpo.replaceChildren();
+    if (chave === 'principais') {
+      corpo.appendChild(criarBarraPosse(estatisticas));
+    }
+    linhasPorCategoria(chave, estatisticas).forEach((item) => corpo.appendChild(criarStatRow(item)));
+  }
+
+  Object.entries(CATEGORIAS_STATS).forEach(([chave, label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'stats-tab-btn' + (chave === 'principais' ? ' active' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      tabsWrap.querySelectorAll('.stats-tab-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderCorpo(chave);
+    });
+    tabsWrap.appendChild(btn);
+  });
+
+  renderCorpo('principais');
+
+  card.append(tabsWrap, teamsRow, corpo);
+  secao.appendChild(card);
+  return secao;
+}
+
+document.getElementById('modal-close').addEventListener('click', () => {
+  modalOverlay.classList.remove('active');
+});
+
+modalOverlay.addEventListener('click', (evento) => {
+  if (evento.target === modalOverlay) {
+    modalOverlay.classList.remove('active');
+  }
+});
+
+async function iniciar() {
+  const temCampeonatos = await carregarCampeonatosSelect();
+  if (temCampeonatos) carregarJogos();
+}
+
+iniciar();

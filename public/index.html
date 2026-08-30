@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API de Esportes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>API de Esportes</h1>
+    <div class="topbar-controles">
+      <select id="quantidade-select" title="Quantidade de jogos analisados na forma recente">
+        <option value="5">Últimos 5 jogos</option>
+        <option value="10" selected>Últimos 10 jogos</option>
+        <option value="15">Últimos 15 jogos</option>
+      </select>
+      <select id="campeonato-select">
+        <option value="">Carregando campeonatos...</option>
+      </select>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="jogos">Jogos</button>
+    <button class="tab-btn" data-tab="tabela">Tabela</button>
+    <button class="tab-btn" data-tab="ao-vivo">Ao Vivo</button>
+    <button class="tab-btn" data-tab="artilharia">Artilharia</button>
+  </nav>
+
+  <main>
+    <section id="jogos" class="tab-panel active">
+      <div class="rodada-nav">
+        <button id="rodada-anterior" class="rodada-nav-btn">‹ Anterior</button>
+        <span id="rodada-titulo" class="rodada-titulo"></span>
+        <button id="rodada-proxima" class="rodada-nav-btn">Próxima ›</button>
+      </div>
+      <div id="jogos-lista"></div>
+    </section>
+
+    <section id="tabela" class="tab-panel">
+      <div class="tabela-wrap">
+        <table class="tabela">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Time</th>
+              <th>P</th>
+              <th>J</th>
+              <th>V</th>
+              <th>E</th>
+              <th>D</th>
+              <th>SG</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="ao-vivo" class="tab-panel">
+      <div id="ao-vivo-lista" class="cards-grid"></div>
+    </section>
+
+    <section id="artilharia" class="tab-panel">
+      <ol id="artilharia-lista" class="artilharia-lista"></ol>
+    </section>
+  </main>
+
+  <div id="modal-overlay" class="modal-overlay">
+    <div class="modal">
+      <button id="modal-close" class="modal-close">×</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

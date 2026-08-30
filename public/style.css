@@ -1,0 +1,981 @@
+:root {
+  --bg: #090d16;
+  --bg-card: #101a2b;
+  --border: #22304a;
+  --text: #eef2f8;
+  --text-dim: #8b98b3;
+  --accent: #17b8ae;
+  --accent-dark: #0a2320;
+  --yellow: #dba327;
+  --red: #e15a52;
+  --blue: #4f7fe0;
+  --team-a: #17b8ae;
+  --team-b: #ff8a4c;
+  --card: #101a2b;
+  --win: #22c55e;
+  --draw: #64748b;
+}
+
+.titulo-condensado {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(23, 184, 174, 0.10), transparent),
+    radial-gradient(ellipse 700px 400px at 100% 0%, rgba(79, 127, 224, 0.08), transparent);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: "Manrope", -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #060911 0%, #0a1220 70%, var(--bg) 100%);
+  backdrop-filter: blur(10px);
+}
+
+.topbar h1 {
+  font-size: 20px;
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.topbar-controles {
+  display: flex;
+  gap: 10px;
+}
+
+#campeonato-select,
+#quantidade-select {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#campeonato-select:hover,
+#quantidade-select:hover {
+  border-color: var(--accent);
+}
+
+#campeonato-select:focus,
+#quantidade-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(23, 184, 174, 0.18);
+}
+
+.tabs {
+  position: sticky;
+  top: 65px;
+  z-index: 19;
+  display: flex;
+  gap: 4px;
+  padding: 12px 32px 0;
+  background: var(--bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+main {
+  padding: 24px 32px 64px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+  animation: entrarConteudo 0.4s ease both;
+}
+
+@keyframes entrarConteudo {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-panel.active {
+    animation: none;
+  }
+}
+
+.tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tabela th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabela td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabela tr td:first-child {
+  border-left: 3px solid transparent;
+}
+
+.tabela tr.libertadores td:first-child { border-left-color: var(--accent); }
+.tabela tr.pre-libertadores td:first-child { border-left-color: var(--blue); }
+.tabela tr.sul-americana td:first-child { border-left-color: var(--yellow); }
+.tabela tr.rebaixados td:first-child { border-left-color: var(--red); }
+
+/* Zonas de campeonatos fora da Série A (ex: Série B tem zona de acesso, não Libertadores) */
+.tabela tr.acesso-serie-a td:first-child { border-left-color: var(--accent); }
+.tabela tr.playoffs-de-acesso td:first-child { border-left-color: var(--blue); }
+.tabela tr.rebaixados-serie-c td:first-child { border-left-color: var(--red); }
+
+.time-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.time-cell img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.jogo-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.jogo-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Revelado progressivamente conforme o elemento entra na tela */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.reveal.visivel {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+.jogo-card .status {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.confronto-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.confronto-linha img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.confronto-linha .nome {
+  flex: 1;
+  font-size: 14px;
+  margin: 0 10px;
+}
+
+.confronto-linha .placar {
+  font-weight: 700;
+  font-size: 16px;
+  min-width: 20px;
+  text-align: center;
+}
+
+.jogo-card .estadio {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+.rodada-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.rodada-nav-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.rodada-nav-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.rodada-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.rodada-titulo {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: 15px;
+}
+
+.data-grupo {
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+}
+
+.data-cabecalho {
+  background: #142033;
+  color: var(--text);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  padding: 10px 16px;
+}
+
+.jogo-linha {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.jogo-linha:hover {
+  background: #16233a;
+}
+
+.jogo-linha .horario {
+  color: var(--text-dim);
+  font-size: 13px;
+  min-width: 42px;
+}
+
+.jogo-linha .confrontos {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jogo-linha .time-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.jogo-linha .time-linha img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.jogo-linha .situacao {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: right;
+  min-width: 70px;
+}
+
+.jogo-linha .situacao.encerrada {
+  color: var(--text);
+}
+
+.jogo-linha .situacao.andamento {
+  color: var(--accent);
+}
+
+.vazio {
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 24px 0;
+}
+
+.artilharia-lista {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: pos;
+}
+
+.artilharia-lista li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.artilharia-lista li img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.artilharia-lista .nome {
+  flex: 1;
+}
+
+.artilharia-lista .gols {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.modal-overlay {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.7);
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+  z-index: 30;
+}
+
+.modal-overlay.active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.25s ease;
+}
+
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  max-width: 560px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  position: relative;
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.25s ease;
+  scrollbar-width: none;
+}
+
+.modal::-webkit-scrollbar {
+  display: none;
+}
+
+.modal-overlay.active .modal {
+  transform: scale(1) translateY(0);
+}
+
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.modal-close:hover {
+  color: var(--text);
+  transform: rotate(90deg);
+}
+
+.resumo-placar {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.resumo-placar .times {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.resumo-placar .placar-grande {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.forma-subtitulo {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.forma-tags-linha {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.forma-tag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.forma-tag-posicao {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.forma-tag-selo {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--border);
+  color: var(--text-dim);
+}
+
+.forma-tag-selo.libertadores {
+  background: rgba(23, 184, 174, 0.18);
+  color: var(--accent);
+}
+
+.forma-tag-selo.pre-libertadores {
+  background: rgba(79, 127, 224, 0.18);
+  color: var(--blue);
+}
+
+.forma-tag-selo.sul-americana {
+  background: rgba(219, 163, 39, 0.18);
+  color: var(--yellow);
+}
+
+.forma-tag-selo.rebaixados {
+  background: rgba(225, 90, 82, 0.18);
+  color: var(--red);
+}
+
+.forma-tag-selo.acesso-serie-a {
+  background: rgba(23, 184, 174, 0.18);
+  color: var(--accent);
+}
+
+.forma-tag-selo.playoffs-de-acesso {
+  background: rgba(79, 127, 224, 0.18);
+  color: var(--blue);
+}
+
+.forma-tag-selo.rebaixados-serie-c {
+  background: rgba(225, 90, 82, 0.18);
+  color: var(--red);
+}
+
+.forma-tag-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+/* Estimativa estatística (Poisson) */
+
+.prob-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.prob-bar {
+  display: flex;
+  height: 34px;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.prob-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+}
+
+.prob-seg-mandante {
+  background: var(--team-a);
+  color: #06231f;
+}
+
+.prob-seg-empate {
+  background: var(--draw);
+  color: #eef2f8;
+}
+
+.prob-seg-visitante {
+  background: var(--team-b);
+  color: #2b1400;
+}
+
+.prob-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.prob-legenda-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prob-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.prob-dot-mandante {
+  background: var(--team-a);
+}
+
+.prob-dot-empate {
+  background: var(--draw);
+}
+
+.prob-dot-visitante {
+  background: var(--team-b);
+}
+
+.prob-nota {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.forma-resultados-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.forma-resultados-nome {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forma-resultados {
+  display: flex;
+  gap: 6px;
+}
+
+.resultado-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.resultado-badge.V {
+  background: var(--win);
+  color: #06280f;
+}
+
+.resultado-badge.E {
+  background: var(--draw);
+  color: #eef2f8;
+}
+
+.resultado-badge.D {
+  background: var(--red);
+  color: #2b0400;
+}
+
+.resumo-secao {
+  margin-top: 20px;
+}
+
+.resumo-secao h3 {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+/* Card de informações (linhas label / valor) */
+
+.info-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-row .label {
+  color: var(--text-dim);
+}
+
+.info-row .valor {
+  font-weight: 700;
+  text-align: right;
+}
+
+/* Estatísticas: tabs + pílulas comparativas */
+
+.stats-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.stats-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.stats-tab-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.stats-tab-btn.active {
+  background: #1a2740;
+  color: var(--text);
+  border-color: transparent;
+}
+
+.stats-teams {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+
+.posse-bar-label {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.posse-bar {
+  display: flex;
+  height: 30px;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 20px;
+}
+
+.posse-bar .lado {
+  display: flex;
+  align-items: center;
+  color: #08201c;
+}
+
+.posse-bar .mandante-lado {
+  background: var(--team-a);
+  justify-content: flex-start;
+  padding-left: 10px;
+}
+
+.posse-bar .visitante-lado {
+  background: var(--team-b);
+  justify-content: flex-end;
+  padding-right: 10px;
+  color: #2b1400;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.stat-pill {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  background: #1a2740;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.stat-pill.lead-mandante {
+  background: var(--team-a);
+  color: #08201c;
+}
+
+.stat-pill.lead-visitante {
+  background: var(--team-b);
+  color: #2b1400;
+}
+
+.stat-row .label {
+  flex: 1;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.evento-linha {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+  padding: 4px 0;
+}
+
+.evento-linha .minuto {
+  color: var(--text-dim);
+  min-width: 42px;
+}
+
+.tabela-wrap {
+  overflow-x: auto;
+}
+
+/* ---------- Responsivo (mobile) ---------- */
+
+@media (max-width: 640px) {
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 16px 18px;
+  }
+
+  .topbar h1 {
+    text-align: center;
+  }
+
+  .topbar-controles {
+    flex-direction: column;
+  }
+
+  #campeonato-select,
+  #quantidade-select {
+    width: 100%;
+  }
+
+  .tabs {
+    top: 0;
+    padding: 10px 18px 0;
+  }
+
+  main {
+    padding: 18px 18px 48px;
+  }
+
+  .tabela-wrap {
+    margin: 0 -18px;
+    padding: 0 18px;
+  }
+
+  .tabela {
+    min-width: 480px;
+  }
+
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal {
+    padding: 20px;
+    border-radius: 12px;
+  }
+
+  .resumo-placar .placar-grande {
+    font-size: 26px;
+  }
+
+  .jogo-linha {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .jogo-linha .horario {
+    min-width: 34px;
+    font-size: 12px;
+  }
+
+  .jogo-linha .situacao {
+    min-width: 56px;
+    font-size: 11px;
+  }
+
+  .stat-row .label {
+    font-size: 11px;
+  }
+}
+
