@@ -763,7 +763,47 @@ main {
   border-bottom: none;
 }
 
-/* Top 5 atuações no perfil do time */
+/* Top 5 atuações no perfil do time (details/summary nativo) */
+
+.top5-detalhes {
+  margin-top: 20px;
+}
+
+.top5-sumario {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.top5-sumario::-webkit-details-marker {
+  display: none;
+}
+
+.top5-sumario::after {
+  content: '+';
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.top5-detalhes[open] .top5-sumario::after {
+  content: '−';
+}
+
+.top5-corpo {
+  margin-top: 14px;
+}
 
 .top5-bloco {
   margin-bottom: 16px;

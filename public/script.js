@@ -440,7 +440,7 @@ async function abrirFormaPreJogo(partida) {
   times.textContent = `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular}`;
   const subtitulo = document.createElement('div');
   subtitulo.className = 'forma-subtitulo';
-  subtitulo.textContent = `Últimos ${quantidade} jogos — não é previsão de resultado`;
+  subtitulo.textContent = `Últimos ${quantidade} jogos`;
   cabecalho.append(times, subtitulo);
   modalContent.appendChild(cabecalho);
 
@@ -706,8 +706,7 @@ function secaoProbabilidade(nomeMandante, nomeVisitante, mediasMandante, mediasV
   nota.className = 'prob-nota';
   nota.textContent =
     `Modelo Poisson a partir da média de gols pró/contra dos últimos jogos ` +
-    `(gols esperados: ${nomeMandante} ${estimativa.xgMandante} x ${estimativa.xgVisitante} ${nomeVisitante}). ` +
-    `Estimativa estatística — não é garantia de resultado.`;
+    `(gols esperados: ${nomeMandante} ${estimativa.xgMandante} x ${estimativa.xgVisitante} ${nomeVisitante}).`;
   card.appendChild(nota);
 
   secao.appendChild(card);
@@ -869,12 +868,19 @@ const TOP5_CATEGORIAS = [
   ['Cartões amarelos', 'cartoesAmarelos'],
 ];
 
+// <details> nativo: expande/recolhe sem JS extra. Fica fechado por padrão
+// pra quem quiser pular direto pras Chances, mas continua ali se quiser abrir.
 function secaoTop5(jogos) {
-  const secao = document.createElement('div');
-  secao.className = 'resumo-secao';
-  const titulo = document.createElement('h3');
-  titulo.textContent = 'Top 5 atuações (no período)';
-  secao.appendChild(titulo);
+  const secao = document.createElement('details');
+  secao.className = 'resumo-secao top5-detalhes';
+
+  const sumario = document.createElement('summary');
+  sumario.className = 'top5-sumario';
+  sumario.textContent = 'Top 5 atuações (no período)';
+  secao.appendChild(sumario);
+
+  const corpo = document.createElement('div');
+  corpo.className = 'top5-corpo';
 
   TOP5_CATEGORIAS.forEach(([label, campo]) => {
     const bloco = document.createElement('div');
@@ -901,9 +907,10 @@ function secaoTop5(jogos) {
         lista.appendChild(item);
       });
     bloco.appendChild(lista);
-    secao.appendChild(bloco);
+    corpo.appendChild(bloco);
   });
 
+  secao.appendChild(corpo);
   return secao;
 }
 
@@ -913,19 +920,23 @@ function secaoTop5(jogos) {
 // já carregados - nada de distribuição estatística projetada, só o que
 // realmente aconteceu nos últimos jogos.
 const ALERTA_CATEGORIAS = [
-  ['Escanteios', 'escanteios', 'mediaEscanteios'],
-  ['Chutes no gol', 'chutesNoGol', 'mediaChutesNoGol'],
-  ['Faltas cometidas', 'faltas', 'mediaFaltas'],
-  ['Cartões amarelos', 'cartoesAmarelos', 'mediaCartoesAmarelos'],
-  ['Gols marcados', 'golsPro', 'mediaGolsPro'],
+  ['Escanteios', 'escanteios', 'mediaEscanteios', ''],
+  ['Chutes no gol', 'chutesNoGol', 'mediaChutesNoGol', ''],
+  ['Finalizações', 'finalizacoes', 'mediaFinalizacoes', ''],
+  ['Faltas cometidas', 'faltas', 'mediaFaltas', ''],
+  ['Cartões amarelos', 'cartoesAmarelos', 'mediaCartoesAmarelos', ''],
+  ['Impedimentos', 'impedimentos', 'mediaImpedimentos', ''],
+  ['Gols marcados', 'golsPro', 'mediaGolsPro', ''],
+  ['Gols sofridos', 'golsContra', 'mediaGolsContra', ''],
+  ['Posse de bola', 'posseDeBola', 'mediaPosseDeBola', '%'],
 ];
 
 function calcularAlertas(jogos, medias) {
-  return ALERTA_CATEGORIAS.map(([label, campo, campoMedia]) => {
+  return ALERTA_CATEGORIAS.map(([label, campo, campoMedia, sufixo]) => {
     const linha = Math.floor(medias[campoMedia]) + 0.5;
     const acima = jogos.filter((jogo) => jogo[campo] > linha).length;
     const percentual = Math.round((acima / jogos.length) * 100);
-    return { label, linha, percentual };
+    return { label, linha, percentual, sufixo };
   });
 }
 
@@ -938,11 +949,11 @@ function secaoAlertas(jogos, medias) {
 
   const lista = document.createElement('div');
   lista.className = 'alertas-lista';
-  calcularAlertas(jogos, medias).forEach(({ label, linha, percentual }) => {
+  calcularAlertas(jogos, medias).forEach(({ label, linha, percentual, sufixo }) => {
     const chip = document.createElement('div');
     chip.className = 'alerta-chip';
     const texto = document.createElement('span');
-    texto.textContent = `${label} > ${linha}`;
+    texto.textContent = `${label} > ${linha}${sufixo}`;
     const valor = document.createElement('span');
     valor.className = 'alerta-percentual';
     valor.textContent = `${percentual}%`;
@@ -953,7 +964,7 @@ function secaoAlertas(jogos, medias) {
 
   const nota = document.createElement('p');
   nota.className = 'prob-nota';
-  nota.textContent = `Frequência nos últimos ${jogos.length} jogos — não é garantia de resultado.`;
+  nota.textContent = `Frequência nos últimos ${jogos.length} jogos.`;
   secao.appendChild(nota);
 
   return secao;
