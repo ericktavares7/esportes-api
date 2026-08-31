@@ -52,10 +52,12 @@ Toda chamada à API Futebol passa primeiro por um cache em SQLite (`data/cache.s
 | Lista de campeonatos | 24 horas |
 | Tabela / artilharia | 1 hora |
 | Lista de rodadas | 6 horas |
-| Detalhe de uma rodada | 5 minutos |
+| Detalhe de uma rodada | **1 ano** se `status: encerrada` (não muda mais), senão 5 minutos |
 | Jogos ao vivo | 20 segundos |
-| Detalhe de uma partida | 1 minuto |
+| Detalhe de uma partida | **1 ano** se `status: finalizado`, 20s se `andamento`, 1 hora se `agendado` |
 | Forma recente de um time (agregado) | 30 minutos |
+
+O TTL de rodada e de partida é dinâmico: depende do `status` que a própria API devolve, não é um prazo fixo (ver `comCache` em [src/db/cache.js](src/db/cache.js), que aceita tanto um número de segundos quanto uma função `(dados) => segundos`). Isso significa que jogos e rodadas já encerrados ficam salvos essencialmente pra sempre, e consultar o mesmo time semanas depois não gasta cota nenhuma pros jogos que já aconteceram — só os dados que ainda podem mudar (jogo ao vivo, jogo agendado) são buscados de novo.
 
 Isso reduz muito o consumo da cota diária da API — essencial no plano Free (100 requisições/dia), já que o comparativo pré-jogo sozinho pode gerar dezenas de chamadas na primeira vez que é aberto. O terminal mostra `[cache] HIT`/`[cache] MISS` a cada chamada, pra acompanhar o que está vindo do cache. A pasta `data/` não vai pro Git (é gerada localmente).
 

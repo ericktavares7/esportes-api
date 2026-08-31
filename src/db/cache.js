@@ -24,10 +24,14 @@ const stmtSalvar = db.prepare(
 );
 
 // Padrao "cache-aside": tenta ler do SQLite primeiro; se nao tiver ou tiver
-// vencido, chama buscarDados() (a API real), salva o resultado com um prazo
-// de validade (ttlSegundos) e devolve. Chamadas repetidas dentro do prazo
-// nao geram nenhuma requisicao nova pra API Futebol.
-export async function comCache(chave, ttlSegundos, buscarDados) {
+// vencido, chama buscarDados() (a API real), salva o resultado e devolve.
+// Chamadas repetidas dentro do prazo nao geram nenhuma requisicao nova pra
+// API Futebol.
+//
+// ttl pode ser um numero fixo de segundos, ou uma funcao (dados) => segundos
+// - assim o prazo de validade pode depender do proprio conteudo (ex: um jogo
+// ja encerrado guarda um TTL bem maior que um jogo ainda agendado).
+export async function comCache(chave, ttl, buscarDados) {
   const linha = stmtBuscar.get(chave);
   const agora = Date.now();
 
@@ -38,6 +42,7 @@ export async function comCache(chave, ttlSegundos, buscarDados) {
 
   console.log(`[cache] MISS ${chave}`);
   const dados = await buscarDados();
+  const ttlSegundos = typeof ttl === 'function' ? ttl(dados) : ttl;
   stmtSalvar.run(chave, JSON.stringify(dados), agora + ttlSegundos * 1000);
   return dados;
 }
