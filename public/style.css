@@ -763,6 +763,58 @@ main {
   border-bottom: none;
 }
 
+/* Top 5 atuações no perfil do time */
+
+.top5-bloco {
+  margin-bottom: 16px;
+}
+
+.top5-rotulo {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.top5-lista {
+  list-style: none;
+  counter-reset: top5;
+  margin: 0;
+  padding: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.top5-lista li {
+  counter-increment: top5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.top5-lista li:last-child {
+  border-bottom: none;
+}
+
+.top5-lista li::before {
+  content: counter(top5) '.';
+  color: var(--text-dim);
+  margin-right: 8px;
+}
+
+.top5-valor {
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
 .info-row .label {
   color: var(--text-dim);
 }

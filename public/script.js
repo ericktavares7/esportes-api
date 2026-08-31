@@ -270,6 +270,8 @@ async function carregarTabela() {
   linhas.forEach((linha) => {
     const tr = document.createElement('tr');
     tr.className = linha.faixa_classificacao ?? '';
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', () => abrirPerfilTime(linha));
 
     tr.appendChild(celula(linha.posicao));
 
@@ -705,6 +707,190 @@ function criarSegmentoProb(tipo, valor) {
   seg.style.width = `${valor}%`;
   seg.textContent = `${valor}%`;
   return seg;
+}
+
+// --- Modal de perfil do time (histórico + top 5 + próximo jogo) ---
+
+async function abrirPerfilTime(linhaTabela) {
+  modalContent.replaceChildren();
+  modalOverlay.classList.add('active');
+
+  const campeonatoId = campeonatoSelect.value;
+  const quantidade = quantidadeSelect.value;
+  const time = linhaTabela.time;
+
+  const cabecalho = document.createElement('div');
+  cabecalho.className = 'resumo-placar';
+  const nomeEl = document.createElement('div');
+  nomeEl.className = 'times';
+  nomeEl.textContent = time.nome_popular;
+  const subtitulo = document.createElement('div');
+  subtitulo.className = 'forma-subtitulo';
+  subtitulo.textContent = `Histórico dos últimos ${quantidade} jogos`;
+  cabecalho.append(nomeEl, subtitulo);
+  modalContent.appendChild(cabecalho);
+
+  const tagsRow = document.createElement('div');
+  tagsRow.className = 'forma-tags-linha';
+  modalContent.appendChild(tagsRow);
+
+  let forma;
+  let numeroRodadaAtual;
+  try {
+    const campeonatos = await fetchJSON('/api/campeonatos');
+    const infoCampeonato = campeonatos.find((c) => String(c.campeonato_id) === campeonatoId);
+    numeroRodadaAtual = infoCampeonato?.rodada_atual?.rodada;
+
+    forma = await fetchJSON(
+      `/api/times/${time.time_id}/forma?campeonato=${campeonatoId}&antes=${numeroRodadaAtual}&quantidade=${quantidade}`,
+    );
+  } catch (err) {
+    modalContent.appendChild(linhaVazia(`Não foi possível carregar o histórico do time: ${err.message}`));
+    return;
+  }
+
+  tagsRow.appendChild(tagContexto(linhaTabela, forma.medias));
+
+  modalContent.appendChild(linhaResultados(time.nome_popular, forma.jogos));
+
+  if (!forma.medias) {
+    modalContent.appendChild(linhaVazia('Sem jogos anteriores suficientes para montar o histórico.'));
+    return;
+  }
+
+  modalContent.appendChild(secaoMediasIndividuais(forma.medias));
+  modalContent.appendChild(secaoTop5(forma.jogos));
+
+  try {
+    const proximoJogo = await buscarProximoJogo(campeonatoId, numeroRodadaAtual, time.time_id);
+    if (proximoJogo) {
+      modalContent.appendChild(await secaoProximoJogo(campeonatoId, quantidade, numeroRodadaAtual, time, proximoJogo));
+    }
+  } catch (err) {
+    modalContent.appendChild(linhaVazia(`Não foi possível carregar o próximo jogo: ${err.message}`));
+  }
+}
+
+async function buscarProximoJogo(campeonatoId, numeroRodada, timeId) {
+  if (numeroRodada == null) return null;
+  const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
+  return (rodada.partidas ?? []).find(
+    (p) => p.status === 'agendado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
+  );
+}
+
+async function secaoProximoJogo(campeonatoId, quantidade, antesRodada, time, partida) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Próximo jogo';
+  secao.appendChild(titulo);
+
+  const linha = document.createElement('div');
+  linha.className = 'forma-resultados-linha';
+  const nomeConfronto = document.createElement('span');
+  nomeConfronto.className = 'forma-resultados-nome';
+  nomeConfronto.textContent = `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular}`;
+  linha.appendChild(nomeConfronto);
+  secao.appendChild(linha);
+
+  const adversarioId =
+    partida.time_mandante.time_id === time.time_id ? partida.time_visitante.time_id : partida.time_mandante.time_id;
+
+  const formaAdversario = await fetchJSON(
+    `/api/times/${adversarioId}/forma?campeonato=${campeonatoId}&antes=${antesRodada}&quantidade=${quantidade}`,
+  );
+
+  const formaTime = await fetchJSON(
+    `/api/times/${time.time_id}/forma?campeonato=${campeonatoId}&antes=${antesRodada}&quantidade=${quantidade}`,
+  );
+
+  if (!formaTime.medias || !formaAdversario.medias) {
+    secao.appendChild(linhaVazia('Sem dados suficientes do adversário para estimar.'));
+    return secao;
+  }
+
+  const ehMandante = partida.time_mandante.time_id === time.time_id;
+  const mediasMandante = ehMandante ? formaTime.medias : formaAdversario.medias;
+  const mediasVisitante = ehMandante ? formaAdversario.medias : formaTime.medias;
+
+  secao.appendChild(
+    secaoProbabilidade(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, mediasMandante, mediasVisitante),
+  );
+
+  return secao;
+}
+
+function secaoMediasIndividuais(medias) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Médias no período';
+  secao.appendChild(titulo);
+
+  const card = document.createElement('div');
+  card.className = 'info-card';
+  LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
+    const row = document.createElement('div');
+    row.className = 'info-row';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'label';
+    labelEl.textContent = label;
+    const valorEl = document.createElement('span');
+    valorEl.className = 'valor';
+    valorEl.textContent = `${medias[campo]}${sufixo}`;
+    row.append(labelEl, valorEl);
+    card.appendChild(row);
+  });
+  secao.appendChild(card);
+
+  return secao;
+}
+
+const TOP5_CATEGORIAS = [
+  ['Chutes no gol', 'chutesNoGol'],
+  ['Gols marcados', 'golsPro'],
+  ['Faltas cometidas', 'faltas'],
+  ['Escanteios', 'escanteios'],
+  ['Cartões amarelos', 'cartoesAmarelos'],
+];
+
+function secaoTop5(jogos) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Top 5 atuações (no período)';
+  secao.appendChild(titulo);
+
+  TOP5_CATEGORIAS.forEach(([label, campo]) => {
+    const bloco = document.createElement('div');
+    bloco.className = 'top5-bloco';
+
+    const rotulo = document.createElement('div');
+    rotulo.className = 'top5-rotulo';
+    rotulo.textContent = label;
+    bloco.appendChild(rotulo);
+
+    const lista = document.createElement('ol');
+    lista.className = 'top5-lista';
+    [...jogos]
+      .sort((a, b) => b[campo] - a[campo])
+      .slice(0, 5)
+      .forEach((jogo) => {
+        const item = document.createElement('li');
+        const adversario = document.createElement('span');
+        adversario.textContent = `${jogo.mandante ? 'vs' : '@'} ${jogo.adversario}`;
+        const valor = document.createElement('span');
+        valor.className = 'top5-valor';
+        valor.textContent = jogo[campo];
+        item.append(adversario, valor);
+        lista.appendChild(item);
+      });
+    bloco.appendChild(lista);
+    secao.appendChild(bloco);
+  });
+
+  return secao;
 }
 
 // --- Modal de resumo ---

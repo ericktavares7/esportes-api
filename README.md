@@ -47,6 +47,17 @@ Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a l
 - Médias comparadas em pílulas (posse de bola, gols, finalizações, chutes no gol, escanteios, impedimentos, faltas, cartões amarelos — a maior média de cada estatística fica destacada)
 - **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). É um modelo real e transparente — a fórmula e os "gols esperados" ficam visíveis — mas continua sendo uma estimativa a partir de poucos jogos, **não uma garantia de resultado**. O projeto não implementa nem vai implementar apostas ou qualquer manipulação de dinheiro.
 
+## Perfil do time (aba Tabela)
+
+Ao clicar num time na tabela de classificação, abre um histórico completo dele:
+
+- Tag de posição/zona + résultados recentes (mesmos componentes do comparativo pré-jogo)
+- Médias no período (posse, gols, finalizações, escanteios, faltas, cartões)
+- **Top 5 atuações**: pra cada estatística (chutes no gol, gols marcados, faltas cometidas, escanteios, cartões amarelos), lista os 5 jogos do período em que o time teve o maior número naquela estatística, com o adversário e o valor
+- **Próximo jogo**: se o time tiver uma partida `agendado` na rodada atual, mostra a mesma estimativa de probabilidade (Poisson) do comparativo pré-jogo, já calculada contra aquele adversário específico
+
+Tudo montado a partir dos mesmos endpoints já existentes (`/api/times/:id/forma`, `/api/campeonatos/:id/tabela`, `/api/campeonatos/:id/rodadas/:numero`) — nenhuma rota nova no backend.
+
 ## Cache local (SQLite)
 
 Toda chamada à API Futebol passa primeiro por um cache em SQLite (`data/cache.sqlite`, criado automaticamente — usa o módulo `node:sqlite` nativo do Node, sem dependência extra). Padrão "cache-aside": se já existe uma cópia válida no banco, ela é usada; senão, busca na API real e salva com um prazo de validade.
