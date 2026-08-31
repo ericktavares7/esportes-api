@@ -1,0 +1,12 @@
+{
+  "name": "API de Esportes",
+  "short_name": "Esportes",
+  "description": "Jogos, tabela, ao vivo e comparativos do futebol brasileiro",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
