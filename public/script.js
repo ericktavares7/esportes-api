@@ -33,9 +33,53 @@ async function fetchJSON(url) {
   if (!resposta.ok) {
     const corpo = await resposta.json().catch(() => null);
     const detalhe = corpo?.detail ?? corpo?.error ?? `HTTP ${resposta.status}`;
-    throw new Error(typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe));
+    const mensagem = typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe);
+    if (mensagem.includes('limite diário')) {
+      mostrarToast('Cota diária da API esgotada — tenta de novo mais tarde.', 'aviso');
+    }
+    throw new Error(mensagem);
   }
   return resposta.json();
+}
+
+// --- Toast (popup temporário no canto da tela) ---
+
+let toastContainer = null;
+
+function mostrarToast(mensagem, tipo = 'info') {
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.className = 'toast-container';
+    document.body.appendChild(toastContainer);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${tipo}`;
+  toast.textContent = mensagem;
+  toastContainer.appendChild(toast);
+
+  requestAnimationFrame(() => toast.classList.add('toast-visivel'));
+
+  setTimeout(() => {
+    toast.classList.remove('toast-visivel');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+  }, 5000);
+}
+
+// --- Uso da cota da API (contador na topbar) ---
+
+async function carregarUsoApi() {
+  const badge = document.getElementById('uso-api-badge');
+  try {
+    const status = await fetchJSON('/api/status');
+    const { hoje, limite } = status.usoApi;
+    const pct = hoje / limite;
+    badge.textContent = `${hoje}/${limite} hoje`;
+    badge.classList.toggle('uso-api-aviso', pct >= 0.5 && pct < 0.9);
+    badge.classList.toggle('uso-api-critico', pct >= 0.9);
+  } catch {
+    badge.textContent = '';
+  }
 }
 
 // --- Campeonatos disponíveis (depende do plano/chave em uso) ---
@@ -1271,6 +1315,7 @@ modalOverlay.addEventListener('click', (evento) => {
 });
 
 async function iniciar() {
+  carregarUsoApi();
   const temCampeonatos = await carregarCampeonatosSelect();
   if (temCampeonatos) carregarJogos();
 }

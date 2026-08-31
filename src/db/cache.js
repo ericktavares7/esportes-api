@@ -17,16 +17,42 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS uso_api (
+    dia TEXT PRIMARY KEY,
+    requisicoes INTEGER NOT NULL
+  )
+`);
+
 const stmtBuscar = db.prepare('SELECT valor, expira_em FROM cache WHERE chave = ?');
 const stmtSalvar = db.prepare(
   'INSERT INTO cache (chave, valor, expira_em) VALUES (?, ?, ?) ' +
     'ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor, expira_em = excluded.expira_em',
 );
 
-// Padrao "cache-aside": tenta ler do SQLite primeiro; se nao tiver ou tiver
-// vencido, chama buscarDados() (a API real), salva o resultado e devolve.
-// Chamadas repetidas dentro do prazo nao geram nenhuma requisicao nova pra
-// API Futebol.
+const stmtIncrementarUso = db.prepare(
+  'INSERT INTO uso_api (dia, requisicoes) VALUES (?, 1) ' +
+    'ON CONFLICT(dia) DO UPDATE SET requisicoes = requisicoes + 1',
+);
+const stmtBuscarUso = db.prepare('SELECT requisicoes FROM uso_api WHERE dia = ?');
+
+function diaDeHoje() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Quantas chamadas reais (nao vindas do cache) foram feitas pra API hoje.
+// So conta o que de fato saiu pra rede - HITs de cache nao contam.
+export function usoApiHoje() {
+  const linha = stmtBuscarUso.get(diaDeHoje());
+  return linha?.requisicoes ?? 0;
+}
+
+// Padrao "cache-aside" com fallback pra dado velho: tenta ler do SQLite
+// primeiro; se nao tiver ou tiver vencido, chama buscarDados() (a API real).
+// Se a API falhar (ex: cota diaria estourada) mas existir uma copia antiga
+// no banco - mesmo vencida - devolve ela em vez de quebrar a tela: um dado
+// de ontem e melhor que nenhum dado. So propaga o erro quando NUNCA existiu
+// nada salvo pra essa chave.
 //
 // ttl pode ser um numero fixo de segundos, ou uma funcao (dados) => segundos
 // - assim o prazo de validade pode depender do proprio conteudo (ex: um jogo
@@ -41,8 +67,17 @@ export async function comCache(chave, ttl, buscarDados) {
   }
 
   console.log(`[cache] MISS ${chave}`);
-  const dados = await buscarDados();
-  const ttlSegundos = typeof ttl === 'function' ? ttl(dados) : ttl;
-  stmtSalvar.run(chave, JSON.stringify(dados), agora + ttlSegundos * 1000);
-  return dados;
+  try {
+    const dados = await buscarDados();
+    stmtIncrementarUso.run(diaDeHoje());
+    const ttlSegundos = typeof ttl === 'function' ? ttl(dados) : ttl;
+    stmtSalvar.run(chave, JSON.stringify(dados), agora + ttlSegundos * 1000);
+    return dados;
+  } catch (err) {
+    if (linha) {
+      console.log(`[cache] STALE ${chave} (API falhou, usando cópia vencida)`);
+      return JSON.parse(linha.valor);
+    }
+    throw err;
+  }
 }

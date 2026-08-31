@@ -4,6 +4,11 @@ import { fileURLToPath } from 'node:url';
 import matchesRouter from './routes/matches.routes.js';
 import campeonatosRouter from './routes/campeonatos.routes.js';
 import timesRouter from './routes/times.routes.js';
+import { usoApiHoje } from './db/cache.js';
+
+// A API Futebol não informa o limite via resposta; esse número reflete o
+// plano atual (visto em /me). Ajuste aqui se o plano mudar.
+const LIMITE_DIARIO_API = 100;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,7 +23,11 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Health check da API (separado da página, pra não conflitar com o index.html)
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', message: 'Esportes Analytics rodando' });
+  res.json({
+    status: 'ok',
+    message: 'Esportes Analytics rodando',
+    usoApi: { hoje: usoApiHoje(), limite: LIMITE_DIARIO_API },
+  });
 });
 
 app.use('/api/matches', matchesRouter);

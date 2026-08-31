@@ -5,7 +5,20 @@ export async function list(req, res, next) {
     // getCampeonatos traz o catalogo inteiro da API; getMinhaConta traz só
     // os IDs que o plano atual libera. Cruzando os dois, o dropdown mostra
     // só o que realmente funciona - sem opção que dá erro ao selecionar.
-    const [campeonatos, minhaConta] = await Promise.all([getCampeonatos(), getMinhaConta()]);
+    const campeonatos = await getCampeonatos();
+
+    let minhaConta;
+    try {
+      minhaConta = await getMinhaConta();
+    } catch (err) {
+      // /me falhou (ex: cota estourada) e ainda não existe nenhuma cópia
+      // salva pra cair como reserva. Em vez de travar a tela toda por causa
+      // de uma chamada só, devolve o catálogo sem filtro - pior o dropdown
+      // mostrar campeonato de mais do que travar mostrando erro.
+      console.warn('Não foi possível filtrar por /me, devolvendo catálogo completo:', err.message);
+      return res.json(campeonatos);
+    }
+
     const idsLiberados = new Set(minhaConta.campeonatos.map((c) => c.campeonato_id));
     const disponiveis = campeonatos.filter((c) => idsLiberados.has(c.campeonato_id));
     res.json(disponiveis);

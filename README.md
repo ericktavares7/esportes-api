@@ -38,6 +38,14 @@ No ambiente de testes (chave `test_...`), os campeonatos disponíveis são: Bras
 
 **Observação sobre o ambiente de testes:** o endpoint `/partidas/:id` ignora o ID passado e sempre devolve o mesmo jogo fictício (Atlético-MG x Palmeiras), então clicar em jogos diferentes na tela sempre abre o mesmo resumo. Isso é uma limitação da chave `test_`, não um bug do projeto — com a chave `live_` cada ID retorna os dados reais daquela partida.
 
+## Resiliência quando a cota da API acaba
+
+Três coisas trabalham juntas pra evitar que a tela quebre quando a cota diária (100/dia no plano atual) estoura:
+
+- **Cache "stale" como reserva** (`comCache` em [src/db/cache.js](src/db/cache.js)): se uma chamada real falha mas existe uma cópia antiga (vencida) salva, ela é usada em vez de propagar o erro. Um dado de horas atrás é melhor que nenhum dado. Só propaga erro quando aquela chave **nunca** foi buscada com sucesso.
+- **Contador de uso** (`usoApiHoje()`): conta só as chamadas que de fato saíram pra rede (HIT de cache não conta), reiniciando a cada dia. Aparece como badge no topo (`GET /api/status`) e fica amarelo a partir de 50% de uso, vermelho a partir de 90%. A API Futebol não expõe isso via header, então é uma contagem própria — o placar zera quando o servidor conta do zero, não necessariamente sincronizado com o reset real da API (que também não é documentado).
+- **Toast em vez de tela travada**: quando uma chamada falha por cota esgotada e não tem nem cache velho pra usar, aparece um aviso pequeno no canto (`mostrarToast`) em vez de qualquer coisa tomando a tela inteira. O texto não cita horário de reset porque a API não informa isso em lugar nenhum.
+
 ## Comparativo pré-jogo (aba Jogos)
 
 Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a lado dos últimos N jogos (5/10/15, escolhido no seletor "Últimos N jogos" do topo) dos dois times:
