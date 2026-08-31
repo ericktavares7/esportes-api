@@ -815,6 +815,31 @@ main {
   flex-shrink: 0;
 }
 
+/* Chances (alertas de over/under por estatística) */
+
+.alertas-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.alerta-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.alerta-percentual {
+  font-weight: 700;
+  color: var(--accent);
+}
+
 .info-row .label {
   color: var(--text-dim);
 }

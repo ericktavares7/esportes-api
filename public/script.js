@@ -468,12 +468,53 @@ async function abrirFormaPreJogo(partida) {
   }
 
   modalContent.appendChild(
-    secaoComparativoMedias(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, formaMandante.medias, formaVisitante.medias),
+    secaoDetalheTimes(
+      [
+        { nome: partida.time_mandante.nome_popular, forma: formaMandante },
+        { nome: partida.time_visitante.nome_popular, forma: formaVisitante },
+      ],
+    ),
   );
 
   modalContent.appendChild(
     secaoProbabilidade(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, formaMandante.medias, formaVisitante.medias),
   );
+}
+
+// Abas pra escolher um dos dois times e ver o perfil individual dele
+// (médias, top 5, chances) sem sair do comparativo do jogo.
+function secaoDetalheTimes(times) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+
+  const tabsWrap = document.createElement('div');
+  tabsWrap.className = 'stats-tabs';
+
+  const corpo = document.createElement('div');
+
+  function renderCorpo(indice) {
+    corpo.replaceChildren();
+    const { forma } = times[indice];
+    corpo.appendChild(secaoMediasIndividuais(forma.medias));
+    corpo.appendChild(secaoTop5(forma.jogos));
+    corpo.appendChild(secaoAlertas(forma.jogos, forma.medias));
+  }
+
+  times.forEach((time, indice) => {
+    const btn = document.createElement('button');
+    btn.className = 'stats-tab-btn' + (indice === 0 ? ' active' : '');
+    btn.textContent = time.nome;
+    btn.addEventListener('click', () => {
+      tabsWrap.querySelectorAll('.stats-tab-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderCorpo(indice);
+    });
+    tabsWrap.appendChild(btn);
+  });
+
+  renderCorpo(0);
+  secao.append(tabsWrap, corpo);
+  return secao;
 }
 
 // Sinais curtos de estilo de jogo, derivados das médias reais — sem prosa,
@@ -569,34 +610,6 @@ const LINHAS_COMPARATIVO = [
   ['Faltas cometidas', 'mediaFaltas', ''],
   ['Cartões amarelos', 'mediaCartoesAmarelos', ''],
 ];
-
-function secaoComparativoMedias(nomeMandante, nomeVisitante, mediasMandante, mediasVisitante) {
-  const secao = document.createElement('div');
-  secao.className = 'resumo-secao';
-
-  const card = document.createElement('div');
-  card.className = 'stats-card';
-
-  const teamsRow = document.createElement('div');
-  teamsRow.className = 'stats-teams';
-  const nomeM = document.createElement('span');
-  nomeM.textContent = nomeMandante;
-  const nomeV = document.createElement('span');
-  nomeV.textContent = nomeVisitante;
-  teamsRow.append(nomeM, nomeV);
-  card.appendChild(teamsRow);
-
-  card.appendChild(
-    criarBarraComparativa('Posse de bola (média)', mediasMandante.mediaPosseDeBola, mediasVisitante.mediaPosseDeBola, '%'),
-  );
-
-  LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
-    card.appendChild(criarStatRow({ label, m: mediasMandante[campo], v: mediasVisitante[campo], sufixo }));
-  });
-
-  secao.appendChild(card);
-  return secao;
-}
 
 // --- Estimativa estatística (modelo de Poisson simplificado) ---
 //
@@ -760,6 +773,7 @@ async function abrirPerfilTime(linhaTabela) {
 
   modalContent.appendChild(secaoMediasIndividuais(forma.medias));
   modalContent.appendChild(secaoTop5(forma.jogos));
+  modalContent.appendChild(secaoAlertas(forma.jogos, forma.medias));
 
   try {
     const proximoJogo = await buscarProximoJogo(campeonatoId, numeroRodadaAtual, time.time_id);
@@ -889,6 +903,58 @@ function secaoTop5(jogos) {
     bloco.appendChild(lista);
     secao.appendChild(bloco);
   });
+
+  return secao;
+}
+
+// "Chances" por estatística: frequência histórica de cada uma passar de uma
+// linha derivada da própria média (arredondada pra baixo + 0.5, o formato
+// "X.5" comum em mercados de over/under). É contagem simples sobre os jogos
+// já carregados - nada de distribuição estatística projetada, só o que
+// realmente aconteceu nos últimos jogos.
+const ALERTA_CATEGORIAS = [
+  ['Escanteios', 'escanteios', 'mediaEscanteios'],
+  ['Chutes no gol', 'chutesNoGol', 'mediaChutesNoGol'],
+  ['Faltas cometidas', 'faltas', 'mediaFaltas'],
+  ['Cartões amarelos', 'cartoesAmarelos', 'mediaCartoesAmarelos'],
+  ['Gols marcados', 'golsPro', 'mediaGolsPro'],
+];
+
+function calcularAlertas(jogos, medias) {
+  return ALERTA_CATEGORIAS.map(([label, campo, campoMedia]) => {
+    const linha = Math.floor(medias[campoMedia]) + 0.5;
+    const acima = jogos.filter((jogo) => jogo[campo] > linha).length;
+    const percentual = Math.round((acima / jogos.length) * 100);
+    return { label, linha, percentual };
+  });
+}
+
+function secaoAlertas(jogos, medias) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Chances (com base nos últimos jogos)';
+  secao.appendChild(titulo);
+
+  const lista = document.createElement('div');
+  lista.className = 'alertas-lista';
+  calcularAlertas(jogos, medias).forEach(({ label, linha, percentual }) => {
+    const chip = document.createElement('div');
+    chip.className = 'alerta-chip';
+    const texto = document.createElement('span');
+    texto.textContent = `${label} > ${linha}`;
+    const valor = document.createElement('span');
+    valor.className = 'alerta-percentual';
+    valor.textContent = `${percentual}%`;
+    chip.append(texto, valor);
+    lista.appendChild(chip);
+  });
+  secao.appendChild(lista);
+
+  const nota = document.createElement('p');
+  nota.className = 'prob-nota';
+  nota.textContent = `Frequência nos últimos ${jogos.length} jogos — não é garantia de resultado.`;
+  secao.appendChild(nota);
 
   return secao;
 }
@@ -1083,31 +1149,6 @@ function linhasPorCategoria(chave, estatisticas) {
   };
 
   return mapa[chave];
-}
-
-function criarBarraComparativa(labelTexto, valorM, valorV, sufixo = '') {
-  const wrap = document.createElement('div');
-
-  const label = document.createElement('div');
-  label.className = 'posse-bar-label';
-  label.textContent = labelTexto;
-
-  const barra = document.createElement('div');
-  barra.className = 'posse-bar';
-
-  const ladoM = document.createElement('div');
-  ladoM.className = 'lado mandante-lado';
-  ladoM.style.width = `${valorM}%`;
-  ladoM.textContent = `${valorM}${sufixo}`;
-
-  const ladoV = document.createElement('div');
-  ladoV.className = 'lado visitante-lado';
-  ladoV.style.width = `${valorV}%`;
-  ladoV.textContent = `${valorV}${sufixo}`;
-
-  barra.append(ladoM, ladoV);
-  wrap.append(label, barra);
-  return wrap;
 }
 
 function criarBarraPosse(estatisticas) {

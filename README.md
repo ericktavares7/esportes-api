@@ -44,8 +44,12 @@ Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a l
 
 - Tag de posição/pontos/zona na tabela + até 2 rótulos curtos de estilo de jogo (ex: "Contra-ataque", "Ataque volumoso"), derivados das médias com limiares fixos documentados em `sinaisPerfil()` no [script.js](public/script.js)
 - Últimos resultados (bolinha verde = vitória, cinza = empate, vermelha = derrota)
-- Médias comparadas em pílulas (posse de bola, gols, finalizações, chutes no gol, escanteios, impedimentos, faltas, cartões amarelos — a maior média de cada estatística fica destacada)
+- **Abas por time** (`secaoDetalheTimes`): escolhe um dos dois times e mostra o perfil individual dele — médias do período, Top 5 atuações e as "Chances" (ver abaixo) — sem sair do modal. Clique no outro time pra trocar.
 - **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). É um modelo real e transparente — a fórmula e os "gols esperados" ficam visíveis — mas continua sendo uma estimativa a partir de poucos jogos, **não uma garantia de resultado**. O projeto não implementa nem vai implementar apostas ou qualquer manipulação de dinheiro.
+
+### Chances (over/under por estatística)
+
+Em "Perfil do time" e dentro das abas do comparativo, cada time mostra chips como *"Escanteios > 5.5 → 60%"*: a linha (`5.5`) vem da própria média do time (arredondada pra baixo + 0.5, o formato usual de mercados over/under), e a porcentagem é a frequência real — quantos dos últimos N jogos passaram dessa linha. É contagem simples sobre jogos que já aconteceram, não uma distribuição estatística projetada — por isso vem sempre com a mesma ressalva: **frequência histórica, não garantia de resultado**.
 
 ## Perfil do time (aba Tabela)
 
@@ -54,6 +58,7 @@ Ao clicar num time na tabela de classificação, abre um histórico completo del
 - Tag de posição/zona + résultados recentes (mesmos componentes do comparativo pré-jogo)
 - Médias no período (posse, gols, finalizações, escanteios, faltas, cartões)
 - **Top 5 atuações**: pra cada estatística (chutes no gol, gols marcados, faltas cometidas, escanteios, cartões amarelos), lista os 5 jogos do período em que o time teve o maior número naquela estatística, com o adversário e o valor
+- **Chances**: chips de frequência over/under por estatística (ver seção acima)
 - **Próximo jogo**: se o time tiver uma partida `agendado` na rodada atual, mostra a mesma estimativa de probabilidade (Poisson) do comparativo pré-jogo, já calculada contra aquele adversário específico
 
 Tudo montado a partir dos mesmos endpoints já existentes (`/api/times/:id/forma`, `/api/campeonatos/:id/tabela`, `/api/campeonatos/:id/rodadas/:numero`) — nenhuma rota nova no backend.
