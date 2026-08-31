@@ -37,6 +37,7 @@
     <button class="tab-btn" data-tab="tabela">Tabela</button>
     <button class="tab-btn" data-tab="ao-vivo">Ao Vivo</button>
     <button class="tab-btn" data-tab="artilharia">Artilharia</button>
+    <button class="tab-btn" data-tab="provaveis">Prováveis</button>
   </nav>
 
   <main>
@@ -47,6 +48,25 @@
         <button id="rodada-proxima" class="rodada-nav-btn">Próxima ›</button>
       </div>
       <div id="jogos-lista"></div>
+    </section>
+
+    <section id="provaveis" class="tab-panel">
+      <div class="provaveis-controles">
+        <label for="limiar-select">Mostrar jogos com</label>
+        <select id="limiar-select">
+          <option value="55">55%</option>
+          <option value="60" selected>60%</option>
+          <option value="65">65%</option>
+          <option value="70">70%</option>
+        </select>
+        <span>ou mais de chance num dos lados</span>
+      </div>
+      <p class="provaveis-aviso">
+        Calcula a estimativa (mesmo modelo de Poisson do comparativo) pra todos os jogos agendados da
+        rodada atual — gasta bem mais requisições que abrir um jogo por vez, por isso é sob demanda.
+      </p>
+      <button id="btn-calcular-provaveis" class="rodada-nav-btn">Calcular jogos prováveis desta rodada</button>
+      <div id="provaveis-lista"></div>
     </section>
 
     <section id="tabela" class="tab-panel">

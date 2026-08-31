@@ -9,6 +9,9 @@ const rodadaTitulo = document.getElementById('rodada-titulo');
 const btnRodadaAnterior = document.getElementById('rodada-anterior');
 const btnRodadaProxima = document.getElementById('rodada-proxima');
 const quantidadeSelect = document.getElementById('quantidade-select');
+const limiarSelect = document.getElementById('limiar-select');
+const btnCalcularProvaveis = document.getElementById('btn-calcular-provaveis');
+const provaveisLista = document.getElementById('provaveis-lista');
 
 let rodadaExibida = null;
 
@@ -289,6 +292,111 @@ function timeLinhaJogos(time) {
   nome.textContent = time.nome_popular;
   linha.append(img, nome);
   return linha;
+}
+
+// --- Prováveis: ranking de jogos agendados por confiança do modelo ---
+
+const NOMES_RESULTADO = { mandante: 'vence', empate: 'empate', visitante: 'vence' };
+
+btnCalcularProvaveis.addEventListener('click', calcularProvaveis);
+
+async function calcularProvaveis() {
+  const campeonatoId = campeonatoSelect.value;
+  const quantidade = quantidadeSelect.value;
+  const limiar = Number(limiarSelect.value);
+
+  btnCalcularProvaveis.disabled = true;
+  btnCalcularProvaveis.textContent = 'Calculando...';
+  provaveisLista.replaceChildren();
+
+  try {
+    const campeonatos = await fetchJSON('/api/campeonatos');
+    const infoCampeonato = campeonatos.find((c) => String(c.campeonato_id) === campeonatoId);
+    const numeroRodada = infoCampeonato?.rodada_atual?.rodada;
+
+    if (numeroRodada == null) {
+      provaveisLista.appendChild(linhaVazia('Este campeonato não tem rodadas sequenciais pra calcular.'));
+      return;
+    }
+
+    const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
+    const agendados = (rodada.partidas ?? []).filter((p) => p.status === 'agendado');
+
+    if (agendados.length === 0) {
+      provaveisLista.appendChild(linhaVazia('Nenhum jogo agendado nesta rodada no momento.'));
+      return;
+    }
+
+    const resultados = await Promise.all(
+      agendados.map(async (partida) => {
+        const [formaMandante, formaVisitante] = await Promise.all([
+          fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${numeroRodada}&quantidade=${quantidade}`),
+          fetchJSON(`/api/times/${partida.time_visitante.time_id}/forma?campeonato=${campeonatoId}&antes=${numeroRodada}&quantidade=${quantidade}`),
+        ]);
+        if (!formaMandante.medias || !formaVisitante.medias) return null;
+
+        const est = estimarProbabilidades(formaMandante.medias, formaVisitante.medias);
+        const opcoes = [
+          { lado: 'mandante', pct: est.vitoriaMandante, nome: partida.time_mandante.nome_popular },
+          { lado: 'empate', pct: est.empate, nome: 'Empate' },
+          { lado: 'visitante', pct: est.vitoriaVisitante, nome: partida.time_visitante.nome_popular },
+        ];
+        const favorito = opcoes.reduce((a, b) => (b.pct > a.pct ? b : a));
+
+        return { partida, favorito };
+      }),
+    );
+
+    const filtrados = resultados
+      .filter((r) => r && r.favorito.pct >= limiar)
+      .sort((a, b) => b.favorito.pct - a.favorito.pct)
+      .slice(0, 10);
+
+    renderProvaveis(filtrados);
+  } catch (err) {
+    provaveisLista.appendChild(linhaVazia(`Não foi possível calcular: ${err.message}`));
+  } finally {
+    btnCalcularProvaveis.disabled = false;
+    btnCalcularProvaveis.textContent = 'Calcular jogos prováveis desta rodada';
+  }
+}
+
+function renderProvaveis(itens) {
+  provaveisLista.replaceChildren();
+
+  if (itens.length === 0) {
+    provaveisLista.appendChild(linhaVazia('Nenhum jogo bateu o limiar escolhido nesta rodada. Tenta um percentual menor.'));
+    return;
+  }
+
+  const lista = document.createElement('ol');
+  lista.className = 'provaveis-ranking';
+
+  itens.forEach(({ partida, favorito }) => {
+    const li = document.createElement('li');
+    li.className = 'provavel-item';
+    li.addEventListener('click', () => abrirFormaPreJogo(partida));
+
+    const cabecalho = document.createElement('div');
+    cabecalho.className = 'provavel-cabecalho';
+    cabecalho.appendChild(el2('span', 'provavel-confronto', `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular}`));
+    cabecalho.appendChild(el2('span', 'provavel-percentual', `${favorito.pct}%`));
+    li.appendChild(cabecalho);
+
+    const texto = favorito.lado === 'empate' ? 'Empate' : `${favorito.nome} ${NOMES_RESULTADO[favorito.lado]}`;
+    li.appendChild(el2('div', 'provavel-detalhe', `${texto} · ${partida.hora_realizacao ?? ''}`));
+
+    lista.appendChild(li);
+  });
+
+  provaveisLista.appendChild(lista);
+}
+
+function el2(tag, cls, texto) {
+  const elemento = document.createElement(tag);
+  elemento.className = cls;
+  elemento.textContent = texto;
+  return elemento;
 }
 
 // --- Tabela ---

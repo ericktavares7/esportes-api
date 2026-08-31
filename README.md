@@ -73,6 +73,14 @@ Ao clicar num time na tabela de classificação, abre um histórico completo del
 
 Tudo montado a partir dos mesmos endpoints já existentes (`/api/times/:id/forma`, `/api/campeonatos/:id/tabela`, `/api/campeonatos/:id/rodadas/:numero`) — nenhuma rota nova no backend.
 
+## Prováveis (aba Prováveis)
+
+Ranking dos jogos agendados da rodada atual ordenados pela maior probabilidade calculada (mesmo modelo de Poisson do comparativo pré-jogo). Um seletor deixa escolher o limiar (55/60/65/70%) — só entram no ranking os jogos em que vitória de um dos lados ou empate bate esse percentual; mostra até os 10 primeiros, ordenados do maior pro menor.
+
+Diferente das outras abas, essa **não carrega sozinha** ao trocar de aba — tem um botão "Calcular jogos prováveis desta rodada" (`calcularProvaveis()` em [script.js](public/script.js)), porque calcular pra todos os jogos da rodada de uma vez busca a forma dos dois times de cada confronto (bem mais requisições do que abrir um jogo por vez). Clicar num item do ranking abre o comparativo completo daquele jogo, reaproveitando `abrirFormaPreJogo`.
+
+Testado com dados reais simulando as respostas da API (`window.fetch` sobrescrito temporariamente) - confirmei o cálculo (ex: Novorizontino 45% vs Avaí, Juventude 38% vs Atlético-GO), a ordenação, a numeração do ranking e o clique abrindo o comparativo certo.
+
 ## Cache local (SQLite)
 
 Toda chamada à API Futebol passa primeiro por um cache em SQLite (`data/cache.sqlite`, criado automaticamente — usa o módulo `node:sqlite` nativo do Node, sem dependência extra). Padrão "cache-aside": se já existe uma cópia válida no banco, ela é usada; senão, busca na API real e salva com um prazo de validade.
