@@ -1,9 +1,14 @@
-import { getCampeonatos, getTabela, getArtilharia, getRodadas, getRodada } from '../services/apiFutebolService.js';
+import { getCampeonatos, getMinhaConta, getTabela, getArtilharia, getRodadas, getRodada } from '../services/apiFutebolService.js';
 
 export async function list(req, res, next) {
   try {
-    const campeonatos = await getCampeonatos();
-    res.json(campeonatos);
+    // getCampeonatos traz o catalogo inteiro da API; getMinhaConta traz só
+    // os IDs que o plano atual libera. Cruzando os dois, o dropdown mostra
+    // só o que realmente funciona - sem opção que dá erro ao selecionar.
+    const [campeonatos, minhaConta] = await Promise.all([getCampeonatos(), getMinhaConta()]);
+    const idsLiberados = new Set(minhaConta.campeonatos.map((c) => c.campeonato_id));
+    const disponiveis = campeonatos.filter((c) => idsLiberados.has(c.campeonato_id));
+    res.json(disponiveis);
   } catch (err) {
     next(err);
   }

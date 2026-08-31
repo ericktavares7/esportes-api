@@ -25,7 +25,7 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
 |---|---|---|
 | GET | `/` | Página web que consome a API (jogos por data, tabela, ao vivo, artilharia) |
 | GET | `/api/status` | Health check |
-| GET | `/api/campeonatos` | Lista campeonatos disponíveis (traz o `campeonato_id` de cada um) |
+| GET | `/api/campeonatos` | Lista só os campeonatos que o plano da sua chave realmente libera (cruza o catálogo completo da API com `/me`) |
 | GET | `/api/campeonatos/:id/tabela` | Classificação do campeonato |
 | GET | `/api/campeonatos/:id/artilharia` | Ranking de artilheiros |
 | GET | `/api/campeonatos/:id/rodadas` | Lista as rodadas do campeonato |

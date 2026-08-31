@@ -25,6 +25,16 @@ export async function getCampeonatos() {
   });
 }
 
+// /me traz os dados da conta, incluindo a lista de campeonatos que o plano
+// atual realmente libera (diferente de /campeonatos, que lista o catalogo
+// inteiro da API, tenha ou nao acesso).
+export async function getMinhaConta() {
+  return comCache('minha-conta', UMA_HORA, async () => {
+    const { data } = await api.get('/me');
+    return data;
+  });
+}
+
 export async function getTabela(campeonatoId) {
   return comCache(`tabela:${campeonatoId}`, UMA_HORA, async () => {
     const { data } = await api.get(`/campeonatos/${campeonatoId}/tabela`);
