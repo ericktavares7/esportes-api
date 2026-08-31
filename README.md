@@ -3,6 +3,10 @@
 API em Node.js/Express que busca dados de jogos de futebol brasileiro (partidas, estatísticas,
 escalações e resumos) a partir da [API Futebol](https://api-futebol.com.br/).
 
+**Em produção:** https://esportes-api.onrender.com (hospedado no Render, plano free — a primeira
+requisição depois de um tempo sem acesso pode demorar ~30-50s pra "acordar" o serviço, e o cache
+SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
+
 ## Configuração
 
 1. Crie uma conta gratuita em https://dash.api-futebol.com.br
