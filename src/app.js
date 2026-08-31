@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Health check da API (separado da página, pra não conflitar com o index.html)
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', message: 'API de Esportes rodando' });
+  res.json({ status: 'ok', message: 'Esportes Analytics rodando' });
 });
 
 app.use('/api/matches', matchesRouter);

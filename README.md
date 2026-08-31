@@ -1,4 +1,4 @@
-# API de Esportes
+# Esportes Analytics
 
 API em Node.js/Express que busca dados de jogos de futebol brasileiro (partidas, estatísticas,
 escalações e resumos) a partir da [API Futebol](https://api-futebol.com.br/).
