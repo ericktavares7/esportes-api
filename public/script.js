@@ -327,7 +327,10 @@ async function calcularProvaveis() {
       return;
     }
 
-    const resultados = await Promise.all(
+    // Promise.allSettled (não Promise.all): um jogo sem cache disponível não
+    // pode derrubar o cálculo dos outros que já tinham dado certo.
+    let falhas = 0;
+    const settled = await Promise.allSettled(
       agendados.map(async (partida) => {
         const [formaMandante, formaVisitante] = await Promise.all([
           fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${numeroRodada}&quantidade=${quantidade}`),
@@ -347,12 +350,20 @@ async function calcularProvaveis() {
       }),
     );
 
+    const resultados = settled.map((s) => {
+      if (s.status === 'rejected') {
+        falhas += 1;
+        return null;
+      }
+      return s.value;
+    });
+
     const filtrados = resultados
       .filter((r) => r && r.favorito.pct >= limiar)
       .sort((a, b) => b.favorito.pct - a.favorito.pct)
       .slice(0, 10);
 
-    renderProvaveis(filtrados);
+    renderProvaveis(filtrados, falhas);
   } catch (err) {
     provaveisLista.appendChild(linhaVazia(`Não foi possível calcular: ${err.message}`));
   } finally {
@@ -361,8 +372,13 @@ async function calcularProvaveis() {
   }
 }
 
-function renderProvaveis(itens) {
+function renderProvaveis(itens, falhas = 0) {
   provaveisLista.replaceChildren();
+
+  if (falhas > 0) {
+    const aviso = falhas === 1 ? '1 jogo não pôde ser calculado agora (sem dados em cache) e ficou de fora.' : `${falhas} jogos não puderam ser calculados agora (sem dados em cache) e ficaram de fora.`;
+    provaveisLista.appendChild(linhaVazia(aviso));
+  }
 
   if (itens.length === 0) {
     provaveisLista.appendChild(linhaVazia('Nenhum jogo bateu o limiar escolhido nesta rodada. Tenta um percentual menor.'));
@@ -596,11 +612,19 @@ async function abrirFormaPreJogo(partida) {
   cabecalho.append(times, subtitulo);
   modalContent.appendChild(cabecalho);
 
-  const [formaMandante, formaVisitante, tabela] = await Promise.all([
-    fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
-    fetchJSON(`/api/times/${partida.time_visitante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
-    fetchJSON(`/api/campeonatos/${campeonatoId}/tabela`),
-  ]);
+  let formaMandante;
+  let formaVisitante;
+  let tabela;
+  try {
+    [formaMandante, formaVisitante, tabela] = await Promise.all([
+      fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
+      fetchJSON(`/api/times/${partida.time_visitante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
+      fetchJSON(`/api/campeonatos/${campeonatoId}/tabela`),
+    ]);
+  } catch (err) {
+    modalContent.appendChild(linhaVazia(`Não foi possível carregar o comparativo: ${err.message}`));
+    return;
+  }
 
   const linhaMandante = tabela.find((l) => l.time.time_id === partida.time_mandante.time_id);
   const linhaVisitante = tabela.find((l) => l.time.time_id === partida.time_visitante.time_id);
