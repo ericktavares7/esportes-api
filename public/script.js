@@ -257,31 +257,41 @@ function renderJogosPorData(partidas) {
     grupos.get(chave).push(partida);
   });
 
-  let primeiroGrupoId = null;
+  const chaves = [...grupos.keys()];
+  const hojeStr = new Date().toDateString();
+  let chaveInicial = chaves.find((chave) => {
+    const iso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
+    return new Date(iso).toDateString() === hojeStr;
+  }) ?? chaves[0];
 
-  grupos.forEach((jogosDoDia, dataChave) => {
-    const dataIso = jogosDoDia[0].data_realizacao_iso ?? dataChave;
-    const idGrupo = `data-grupo-${dataChave.replace(/\D/g, '')}`;
-    if (!primeiroGrupoId) primeiroGrupoId = idGrupo;
+  function mostrarGrupo(chave) {
+    const jogosDoDia = grupos.get(chave);
+    const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
 
+    jogosLista.replaceChildren();
     const grupo = document.createElement('div');
     grupo.className = 'data-grupo';
-    grupo.id = idGrupo;
 
     const cabecalho = document.createElement('div');
     cabecalho.className = 'data-cabecalho';
     cabecalho.textContent = formatarData(dataIso);
     grupo.appendChild(cabecalho);
 
-    jogosDoDia.forEach((partida) => {
-      grupo.appendChild(criarLinhaJogo(partida));
-    });
-
+    jogosDoDia.forEach((partida) => grupo.appendChild(criarLinhaJogo(partida)));
     jogosLista.appendChild(grupo);
+
+    datasPills.querySelectorAll('.data-pill').forEach((p) => {
+      p.classList.toggle('active', p.dataset.chave === chave);
+    });
+  }
+
+  chaves.forEach((chave) => {
+    const jogosDoDia = grupos.get(chave);
+    const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
 
     const pill = document.createElement('button');
     pill.className = 'data-pill';
-    pill.dataset.alvo = idGrupo;
+    pill.dataset.chave = chave;
     const rotulo = document.createElement('div');
     rotulo.className = 'pill-rotulo';
     rotulo.textContent = formatarRotuloPill(dataIso);
@@ -289,17 +299,11 @@ function renderJogosPorData(partidas) {
     subrotulo.className = 'pill-data';
     subrotulo.textContent = formatarDataCurta(dataIso);
     pill.append(rotulo, subrotulo);
-    pill.addEventListener('click', () => {
-      document.getElementById(idGrupo).scrollIntoView({ behavior: 'smooth', block: 'start' });
-      datasPills.querySelectorAll('.data-pill').forEach((p) => p.classList.remove('active'));
-      pill.classList.add('active');
-    });
+    pill.addEventListener('click', () => mostrarGrupo(chave));
     datasPills.appendChild(pill);
   });
 
-  if (primeiroGrupoId) {
-    datasPills.querySelector(`[data-alvo="${primeiroGrupoId}"]`)?.classList.add('active');
-  }
+  mostrarGrupo(chaveInicial);
 }
 
 function criarLinhaJogo(partida) {
