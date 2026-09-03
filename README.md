@@ -47,6 +47,16 @@ Três coisas trabalham juntas pra evitar que a tela quebre quando a cota diária
 - **Toast em vez de tela travada**: quando uma chamada falha por cota esgotada e não tem nem cache velho pra usar, aparece um aviso pequeno no canto (`mostrarToast`) em vez de qualquer coisa tomando a tela inteira. O texto não cita horário de reset porque a API não informa isso em lugar nenhum.
 - **`Promise.all` sem tratamento de erro derruba tudo, não só o que falhou**: era um bug real, não coberto pelas três correções acima. `abrirFormaPreJogo` (comparativo pré-jogo) não tinha `try/catch` nenhum - se um time nunca cacheado falhasse, o modal ficava preso só com o cabeçalho, sem nenhuma mensagem. E `calcularProvaveis` usava `Promise.all` simples: **um** jogo sem cache derrubava o ranking inteiro, mesmo que os outros 9 tivessem dado certo. Corrigido: `abrirFormaPreJogo` agora tem `try/catch` com mensagem inline, e `calcularProvaveis` usa `Promise.allSettled` - joga fora só os jogos que falharam e mostra os que deram certo, com uma nota tipo "1 jogo não pôde ser calculado agora e ficou de fora".
 
+### Navegação por dias (aba Jogos)
+
+No lugar de setas + "36ª Rodada", os jogos aparecem agrupados por data com uma barra horizontal de
+pílulas no estilo apps de apostas (Sportingbet, Superbet etc.): cada pílula mostra um rótulo relativo
+("Hoje", "Amanhã", "Em 2 dias", "Ontem", "3 dias atrás"...) e a data curta embaixo (`formatarRotuloPill`/
+`formatarDataCurta` no [script.js](public/script.js)). Clicar numa pílula rola suavemente até o grupo
+daquele dia na lista e marca ela como ativa. As setas `‹`/`›` continuam trocando de rodada inteira (a
+API só entrega jogos rodada por rodada) — a rodada atual agora aparece como legenda pequena
+("26ª RODADA") acima da lista, em vez de ser o elemento principal de navegação.
+
 ## Comparativo pré-jogo (aba Jogos)
 
 Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a lado dos últimos N jogos (5/10/15, escolhido no seletor "Últimos N jogos" do topo) dos dois times:

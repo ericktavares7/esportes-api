@@ -12,6 +12,7 @@ const quantidadeSelect = document.getElementById('quantidade-select');
 const limiarSelect = document.getElementById('limiar-select');
 const btnCalcularProvaveis = document.getElementById('btn-calcular-provaveis');
 const provaveisLista = document.getElementById('provaveis-lista');
+const datasPills = document.getElementById('datas-pills');
 
 let rodadaExibida = null;
 
@@ -210,6 +211,26 @@ function formatarData(dataIso) {
   return texto.charAt(0).toUpperCase() + texto.slice(1).replace('.', '');
 }
 
+// "Hoje" / "Amanhã" / "Em N dias" - igual ao formato de sites de aposta,
+// calculado a partir da diferença de dias corridos até a data do jogo.
+function formatarRotuloPill(dataIso) {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const data = new Date(dataIso);
+  data.setHours(0, 0, 0, 0);
+  const diffDias = Math.round((data - hoje) / 86400000);
+
+  if (diffDias === 0) return 'Hoje';
+  if (diffDias === 1) return 'Amanhã';
+  if (diffDias === -1) return 'Ontem';
+  if (diffDias > 1) return `Em ${diffDias} dias`;
+  return `${Math.abs(diffDias)} dias atrás`;
+}
+
+function formatarDataCurta(dataIso) {
+  return new Date(dataIso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
 function situacaoJogo(partida) {
   if (partida.status === 'andamento') {
     return { texto: `${partida.cronometro}'`, classe: 'andamento' };
@@ -222,6 +243,7 @@ function situacaoJogo(partida) {
 
 function renderJogosPorData(partidas) {
   jogosLista.replaceChildren();
+  datasPills.replaceChildren();
 
   if (partidas.length === 0) {
     jogosLista.appendChild(linhaVazia('Sem jogos cadastrados nesta rodada.'));
@@ -235,13 +257,20 @@ function renderJogosPorData(partidas) {
     grupos.get(chave).push(partida);
   });
 
+  let primeiroGrupoId = null;
+
   grupos.forEach((jogosDoDia, dataChave) => {
+    const dataIso = jogosDoDia[0].data_realizacao_iso ?? dataChave;
+    const idGrupo = `data-grupo-${dataChave.replace(/\D/g, '')}`;
+    if (!primeiroGrupoId) primeiroGrupoId = idGrupo;
+
     const grupo = document.createElement('div');
     grupo.className = 'data-grupo';
+    grupo.id = idGrupo;
 
     const cabecalho = document.createElement('div');
     cabecalho.className = 'data-cabecalho';
-    cabecalho.textContent = formatarData(jogosDoDia[0].data_realizacao_iso ?? dataChave);
+    cabecalho.textContent = formatarData(dataIso);
     grupo.appendChild(cabecalho);
 
     jogosDoDia.forEach((partida) => {
@@ -249,7 +278,28 @@ function renderJogosPorData(partidas) {
     });
 
     jogosLista.appendChild(grupo);
+
+    const pill = document.createElement('button');
+    pill.className = 'data-pill';
+    pill.dataset.alvo = idGrupo;
+    const rotulo = document.createElement('div');
+    rotulo.className = 'pill-rotulo';
+    rotulo.textContent = formatarRotuloPill(dataIso);
+    const subrotulo = document.createElement('div');
+    subrotulo.className = 'pill-data';
+    subrotulo.textContent = formatarDataCurta(dataIso);
+    pill.append(rotulo, subrotulo);
+    pill.addEventListener('click', () => {
+      document.getElementById(idGrupo).scrollIntoView({ behavior: 'smooth', block: 'start' });
+      datasPills.querySelectorAll('.data-pill').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+    });
+    datasPills.appendChild(pill);
   });
+
+  if (primeiroGrupoId) {
+    datasPills.querySelector(`[data-alvo="${primeiroGrupoId}"]`)?.classList.add('active');
+  }
 }
 
 function criarLinhaJogo(partida) {

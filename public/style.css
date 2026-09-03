@@ -356,11 +356,87 @@ main {
   margin-top: 10px;
 }
 
-.rodada-nav {
+.jogos-topo {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 8px;
+}
+
+.rodada-seta {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease;
+}
+
+.rodada-seta:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.rodada-seta:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.datas-pills {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.datas-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.data-pill {
+  flex-shrink: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.data-pill:hover {
+  border-color: var(--accent);
+}
+
+.data-pill.active {
+  background: #16233a;
+  border-color: var(--accent);
+}
+
+.data-pill .pill-rotulo {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  white-space: nowrap;
+}
+
+.data-pill.active .pill-rotulo {
+  color: var(--accent);
+}
+
+.data-pill .pill-data {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  white-space: nowrap;
 }
 
 /* Aba Prováveis */
@@ -478,11 +554,11 @@ main {
 }
 
 .rodada-titulo {
-  font-family: "Space Grotesk", "Segoe UI", sans-serif;
-  font-weight: 700;
+  font-size: 11px;
+  color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  font-size: 15px;
+  letter-spacing: 0.03em;
+  margin: 10px 0 16px;
 }
 
 .data-grupo {
