@@ -36,9 +36,8 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
 | GET | `/api/matches/live` | Jogos acontecendo agora |
 | GET | `/api/matches/:id/summary` | Resumo completo de um jogo: placar, gols, cartões, substituições, escalações e estatísticas |
 | GET | `/api/times/:timeId/forma?campeonato=X&antes=Y&quantidade=5` | Últimos N jogos encerrados do time antes da rodada Y: resultados e médias (gols, escanteios, finalizações, chutes no gol, faltas, posse de bola) |
-| GET | `/api/times/:timeId/jogos-recentes?campeonato=X&antes=Y&limite=20` | Lista os últimos jogos encerrados do time (data, adversário, placar, se já está em cache) **sem** buscar o detalhe estatístico de cada um - usado pra montar a lista de escolha da seleção manual, sem gastar requisição |
 | POST | `/api/chat` | `{ mensagem, historico?, provedor?, apiKey?, modelo?, quantidadePadrao? }` → assistente (Claude/ChatGPT/Gemini) que responde perguntas sobre confrontos usando dados reais das outras rotas (ver seção Chat abaixo) |
-| POST | `/api/chat/analise-manual` | `{ timeMandanteId, jogosMandanteIds, timeVisitanteId, jogosVisitanteIds }` → calcula o mesmo resultado de `analisar_confronto`, mas a partir de uma lista explícita de partidas escolhidas manualmente; nega o pedido se não sobrar cota suficiente pra buscar os jogos ainda não cacheados |
+| POST | `/api/chat/analise-automatica` | `{ timeMandanteId, timeVisitanteId, numeroRodada, quantidade? }` → calcula o mesmo resultado de `analisar_confronto` (probabilidade + Chances) sem passar pela IA - usado pelo seletor de jogo 🗂️ (ver "Selecionar jogo pra analisar" abaixo) |
 
 No ambiente de testes (chave `test_...`), os campeonatos disponíveis são: Brasileirão (`id 10`), Copa do Brasil (`id 2`) e Libertadores (`id 7`). Copa do Brasil e Libertadores são mata-mata, então `/rodadas` retorna vazio pra elas (não têm rodadas sequenciais).
 
@@ -70,7 +69,7 @@ Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a l
 - Tag de posição/pontos/zona na tabela + até 2 rótulos curtos de estilo de jogo (ex: "Contra-ataque", "Ataque volumoso"), derivados das médias com limiares fixos documentados em `sinaisPerfil()` no [script.js](public/script.js)
 - Últimos resultados (bolinha verde = vitória, cinza = empate, vermelha = derrota)
 - **Abas por time** (`secaoDetalheTimes`): escolhe um dos dois times e mostra o perfil individual dele — médias do período, Top 5 atuações e as "Chances" (ver abaixo) — sem sair do modal. Clique no outro time pra trocar.
-- **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro).
+- **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). A mesma grade de Poisson também gera **"Ambas marcam"** e **"Mais de 2.5 gols"** (soma as combinações de placar onde os dois marcam, ou onde o total passa de 2.5) - mercados comuns em casas de aposta, mostrados junto da barra de probabilidade (`criarBarraProbabilidade` no [script.js](public/script.js)).
 
 ### Chances (over/under por estatística)
 
@@ -153,46 +152,47 @@ gasta cota da API Futebol de novo.
 uso pessoal esporádico (algumas perguntas por dia, entre você e seu irmão) o custo tende a ficar na casa
 de centavos por mês, mas depende do modelo - ver a página de preços do provedor escolhido.
 
-### Seleção manual dos jogos (🗂️)
+### Selecionar jogos pra analisar - com múltipla (🗂️)
 
-Por padrão o chat usa "os últimos N jogos" (a quantidade configurada na engrenagem, ou o seletor
-"Últimos N jogos" do topo quando a seleção parte da aba Jogos) pra montar o histórico de cada time. O
-botão 🗂️ - na aba Jogos (perto das setas de rodada) e na aba Chat (perto da engrenagem) - abre uma
-alternativa: você escolhe manualmente, jogo a jogo, quais partidas entram no histórico de cada time.
+O botão 🗂️ - na aba Jogos (perto das setas de rodada) e na aba Chat (perto da engrenagem) - abre um
+jeito rápido de escolher um ou vários jogos futuros pra analisar, sem digitar nada.
 
-Fluxo: primeiro escolhe o **dia** (pílulas "Amanhã / Em 2 dias / Em 3 dias...", igual a navegação da
-aba Jogos - pula pra próxima rodada automaticamente se a atual já tiver terminado), depois o
-**confronto** daquele dia → o app busca os últimos 20 jogos encerrados de cada time **sem gastar
-requisição** (só usa dados que a listagem de rodadas já traz - nome dos times, data, placar; não busca
-o detalhe estatístico de cada partida) → você marca quais quer incluir, com cada jogo já indicando se
-está "em cache" (0 requisições) ou "nova requisição" → um contador ao vivo mostra quantas requisições
-novas a seleção atual custaria, comparado com quanto ainda resta na cota do dia.
+Fluxo: escolhe o **dia** (pílulas "Amanhã / Em 2 dias / Em 3 dias..."; o app junta os agendados de até
+3 rodadas seguidas pra ter bastante dia pra navegar, preenchendo bem o espaço da tela) → vê **todos os
+jogos daquele dia** como uma lista com checkbox (times, escudo, horário) → marca um ou mais jogos - a
+seleção continua marcada ao trocar de dia, então dá pra montar uma "múltipla" com jogos de dias
+diferentes → "Analisar seleção" calcula cada jogo separadamente (`Promise.allSettled` - um jogo sem
+histórico suficiente não derruba os outros, só fica de fora com um aviso), usando a quantidade padrão
+configurada (engrenagem do chat, ou o seletor "Últimos N jogos" do topo quando a seleção parte da aba
+Jogos).
 
-Só ao clicar em "Confirmar e analisar" o app busca de fato o detalhe (estatísticas) dos jogos
-selecionados - e só desses, nada a mais. Antes de buscar, `analisarConfrontoManual` (em
-[chatTools.js](src/services/chatTools.js)) confere de novo quantas dessas partidas ainda não estão em
-cache e compara com o que sobra na cota diária (`LIMITE_DIARIO_API - usoApiHoje()`); se não sobrar
-requisição suficiente, nega o pedido com uma mensagem explicando exatamente quantas faltam, em vez de
-buscar parte dos jogos e travar no meio.
+**Importante:** cada jogo é analisado de forma independente - o app nunca calcula nem mostra uma
+"probabilidade combinada" da múltipla inteira (isso exigiria assumir que os jogos são estatisticamente
+independentes, o que não é garantido, e criaria uma falsa sensação de precisão). O prompt do chat
+também é explícito nisso: ao receber vários jogos pré-calculados, monta uma ficha curta pra cada um,
+sem inventar um número combinado.
 
 O que acontece com o resultado depende de onde a seleção começou:
 
-- **Pela aba Chat**: vira uma mensagem no chat pedindo pra IA só formatar a ficha (vitória/empate/
-  derrota + chances) - o prompt deixa explícito que, nesse caso, ela não deve chamar as ferramentas de
-  novo, só usar os números já calculados.
+- **Pela aba Chat**: vira uma mensagem no chat pedindo pra IA só formatar a ficha de cada jogo
+  (vitória/empate/derrota, ambas marcam, mais de 2.5 gols, chances) - o prompt deixa explícito que,
+  nesse caso, ela não deve chamar as ferramentas de novo, só usar os números já calculados.
 - **Pela aba Jogos**: não passa por nenhuma IA - o resultado é salvo direto na aba **Jogos Pesquisados**
-  (ver abaixo).
+  (ver abaixo), como uma "múltipla" quando mais de um jogo foi selecionado.
 
 ## Jogos Pesquisados
 
-Toda análise feita pela seleção manual da aba Jogos vira um card guardado nessa aba, sem precisar de
-IA nem de chave de nenhum provedor - é só o cálculo determinístico (Poisson + Chances) de sempre,
-guardado no `localStorage` do navegador (até 30 mais recentes). Cada card mostra:
+Toda análise feita pelo seletor 🗂️ da aba Jogos vira um card guardado nessa aba, sem precisar de IA
+nem de chave de nenhum provedor - é só o cálculo determinístico (Poisson + Chances) de sempre, guardado
+no `localStorage` do navegador (até 30 mais recentes). Selecionar vários jogos de uma vez guarda todos
+juntos num único card "Múltipla de N jogos". Cada jogo dentro do card mostra:
 
-- A barra de probabilidade (mesmo componente visual do comparativo pré-jogo)
+- A barra de probabilidade (mesmo componente visual do comparativo pré-jogo) + "Ambas marcam" e "Mais
+  de 2.5 gols"
 - Uma "Sugestão" com o lado de maior probabilidade (vitória de um dos times, ou empate) e o percentual
-- As 3 "Chances" (over/under) mais altas entre os dois times
-- Quando o jogo acontece e quando você pesquisou, com botão pra remover o card
+- As 9 "Chances" (over/under) de cada time, sem cortar pras mais altas - pra dar visão completa de
+  todos os mercados na hora de montar uma múltipla (ex: escanteios de um time específico)
+- Quando o jogo acontece e quando você pesquisou, com botão pra remover o card inteiro
 
 `localStorage` só guarda o texto de quem pesquisou naquele navegador especificamente - não sincroniza
 entre aparelhos nem precisa de conta.

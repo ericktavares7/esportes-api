@@ -20,6 +20,10 @@ export function estimarProbabilidades(mediasMandante, mediasVisitante) {
   let vitoriaMandante = 0;
   let empate = 0;
   let vitoriaVisitante = 0;
+  // Mercados extras (estilo casa de aposta) - saem da mesma grade de Poisson,
+  // só somando outras combinações de placar em vez de comparar i/j.
+  let ambasMarcam = 0;
+  let maisDe25Gols = 0;
 
   for (let i = 0; i <= 8; i++) {
     for (let j = 0; j <= 8; j++) {
@@ -27,6 +31,9 @@ export function estimarProbabilidades(mediasMandante, mediasVisitante) {
       if (i > j) vitoriaMandante += probabilidade;
       else if (i === j) empate += probabilidade;
       else vitoriaVisitante += probabilidade;
+
+      if (i >= 1 && j >= 1) ambasMarcam += probabilidade;
+      if (i + j > 2.5) maisDe25Gols += probabilidade;
     }
   }
 
@@ -46,6 +53,8 @@ export function estimarProbabilidades(mediasMandante, mediasVisitante) {
     vitoriaVisitante: valores[2],
     xgMandante: Math.round(xgMandante * 10) / 10,
     xgVisitante: Math.round(xgVisitante * 10) / 10,
+    ambasMarcam: Math.round((ambasMarcam / total) * 100),
+    maisDe25Gols: Math.round((maisDe25Gols / total) * 100),
   };
 }
 

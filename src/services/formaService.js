@@ -1,5 +1,5 @@
 import { getRodada, getPartida } from './apiFutebolService.js';
-import { comCache, estaCache } from '../db/cache.js';
+import { comCache } from '../db/cache.js';
 
 // Anda pelas rodadas anteriores até achar N jogos já encerrados do time,
 // depois busca o detalhe completo (com estatísticas) de cada um. O resultado
@@ -26,44 +26,6 @@ export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantid
 
     return { jogos, medias: calcularMedias(jogos) };
   });
-}
-
-// Lista os últimos jogos encerrados de um time SEM buscar o detalhe completo
-// (getPartida) de cada um - só o necessário pra exibir uma lista de escolha
-// (data, adversário, placar) e indicar quais já custariam 0 requisição por já
-// estarem em cache. Quem decide buscar o detalhe de fato é buscarJogosPorId,
-// só depois que o usuário confirma quais jogos quer.
-export async function listarJogosRecentes(campeonatoId, timeId, antesRodada, limite = 20) {
-  const encontrados = [];
-  let numero = antesRodada - 1;
-
-  while (numero >= 1 && encontrados.length < limite) {
-    const rodada = await getRodada(campeonatoId, numero);
-    const partida = (rodada.partidas ?? []).find(
-      (p) => p.status === 'finalizado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
-    );
-    if (partida) encontrados.push(partida);
-    numero -= 1;
-  }
-
-  return encontrados.map((p) => ({
-    partidaId: p.partida_id,
-    data: p.data_realizacao_iso,
-    mandante: p.time_mandante.nome_popular,
-    visitante: p.time_visitante.nome_popular,
-    placarMandante: p.placar_mandante,
-    placarVisitante: p.placar_visitante,
-    emCache: estaCache(`partida:${p.partida_id}`),
-  }));
-}
-
-// Mesma agregação de buscarFormaTime (jogos + médias), mas a partir de uma
-// lista explícita de IDs de partida escolhida pelo usuário, em vez de
-// caminhar as últimas N rodadas automaticamente.
-export async function buscarJogosPorId(timeId, partidaIds) {
-  const detalhes = await Promise.all(partidaIds.map((id) => getPartida(id)));
-  const jogos = detalhes.map((partida) => montarLinhaForma(partida, timeId));
-  return { jogos, medias: calcularMedias(jogos) };
 }
 
 function montarLinhaForma(partida, timeId) {

@@ -1,5 +1,5 @@
 import { responder } from '../services/chatService.js';
-import { analisarConfrontoManual } from '../services/chatTools.js';
+import { analisarConfronto } from '../services/chatTools.js';
 
 export async function chat(req, res, next) {
   try {
@@ -21,26 +21,26 @@ export async function chat(req, res, next) {
   }
 }
 
-export async function analiseManual(req, res, next) {
+export async function analiseAutomatica(req, res, next) {
   try {
-    const { timeMandanteId, jogosMandanteIds, timeVisitanteId, jogosVisitanteIds } = req.body;
+    const { timeMandanteId, timeVisitanteId, numeroRodada, quantidade } = req.body;
     if (
       !Number.isFinite(Number(timeMandanteId)) ||
       !Number.isFinite(Number(timeVisitanteId)) ||
-      !Array.isArray(jogosMandanteIds) ||
-      !Array.isArray(jogosVisitanteIds) ||
-      jogosMandanteIds.length === 0 ||
-      jogosVisitanteIds.length === 0
+      !Number.isFinite(Number(numeroRodada))
     ) {
-      return res.status(400).json({ error: 'Selecione pelo menos um jogo de cada time.' });
+      return res.status(400).json({ error: 'timeMandanteId, timeVisitanteId e numeroRodada são obrigatórios.' });
     }
 
-    const resultado = await analisarConfrontoManual({
-      timeMandanteId: Number(timeMandanteId),
-      jogosMandanteIds: jogosMandanteIds.map(Number),
-      timeVisitanteId: Number(timeVisitanteId),
-      jogosVisitanteIds: jogosVisitanteIds.map(Number),
-    });
+    const resultado = await analisarConfronto(
+      {
+        timeMandanteId: Number(timeMandanteId),
+        timeVisitanteId: Number(timeVisitanteId),
+        numeroRodada: Number(numeroRodada),
+        quantidade: quantidade ? Number(quantidade) : undefined,
+      },
+      {},
+    );
 
     res.json(resultado);
   } catch (err) {

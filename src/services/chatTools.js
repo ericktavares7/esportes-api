@@ -5,10 +5,8 @@
 // números reais, calculados por código - o modelo só formata e explica.
 
 import { getCampeonatos, getMinhaConta, getRodada } from './apiFutebolService.js';
-import { buscarFormaTime, buscarJogosPorId } from './formaService.js';
+import { buscarFormaTime } from './formaService.js';
 import { estimarProbabilidades, calcularAlertas } from './estatisticasService.js';
-import { estaCache, usoApiHoje } from '../db/cache.js';
-import { LIMITE_DIARIO_API } from '../config/limites.js';
 
 export const SYSTEM_PROMPT = `Você é o assistente do Esportes Analytics, um app pessoal (sem dinheiro
 real, sem apostas de verdade) que o dono usa pra comparar times do Brasileirão Série B com o irmão dele.
@@ -23,13 +21,16 @@ Náutico x Botafogo-SP"):
    próprio sistema já usa a quantidade padrão configurada pelo usuário nas configurações do chat. Só
    pergunte por um número diferente se o usuário mencionar explicitamente "últimos 5/10/15 jogos" ou
    pedir pra mudar no meio da conversa.
-3. Responda no estilo de uma ficha de casa de apostas: percentual de vitória/empate/derrota e as
-   "chances" (over/under) mais relevantes de cada time (escanteios, cartões, gols, etc). Não precisa
-   listar as 9 categorias sempre - escolha as mais interessantes pro jogo em questão.
+3. Responda no estilo de uma ficha de casa de apostas: percentual de vitória/empate/derrota, "ambas
+   marcam" e "mais de 2.5 gols" (vêm em probabilidade.ambasMarcam/maisDe25Gols), e as "chances"
+   (over/under) mais relevantes de cada time (escanteios, cartões, gols, etc). Não precisa listar as
+   9 categorias sempre - escolha as mais interessantes pro jogo em questão.
 
-Se a mensagem do usuário já vier com um bloco chamado "DADOS PRÉ-CALCULADOS (seleção manual)": esses
-dados já foram calculados a partir dos jogos exatos que o usuário escolheu na tela - NÃO chame
-buscar_jogos_rodada nem analisar_confronto de novo, só monte a ficha de análise com esses números.
+Se a mensagem do usuário já vier com um bloco chamado "DADOS PRÉ-CALCULADOS": esses dados já foram
+calculados a partir do(s) jogo(s) que o usuário escolheu na tela - NÃO chame buscar_jogos_rodada nem
+analisar_confronto de novo, só monte a ficha de análise com esses números. Se vier mais de um jogo
+(pensando numa "múltipla"), monte uma ficha curta pra cada jogo separadamente - não invente uma
+probabilidade combinada da múltipla inteira, cada jogo é independente e o usuário decide como combinar.
 
 Regras importantes:
 - Nunca invente número. Todo percentual e média vêm exatamente dos dados que as ferramentas (ou o
@@ -148,7 +149,7 @@ function montarResultadoConfronto(formaMandante, formaVisitante) {
   };
 }
 
-async function analisarConfronto(input, contexto) {
+export async function analisarConfronto(input, contexto) {
   const campeonatoId = await resolverCampeonatoId();
   const quantidade = input.quantidade ?? contexto?.quantidadePadrao ?? 10;
 
@@ -167,37 +168,3 @@ export async function executarFerramenta(nome, input, contexto) {
 }
 
 export const MAX_VOLTAS = 6;
-
-// --- Seleção manual de jogos (fora do loop de tool use) ---
-//
-// Quando o usuário escolhe manualmente, na tela, quais jogos entram no
-// histórico de cada time, o resultado é calculado direto por código (sem
-// passar pelo modelo) - o mesmo cálculo de analisar_confronto, só que a
-// partir de uma lista explícita de partidas em vez de "últimos N jogos".
-
-export function estimarCustoSelecionados(jogosMandanteIds, jogosVisitanteIds) {
-  const todos = [...jogosMandanteIds, ...jogosVisitanteIds];
-  const requisicoesNecessarias = todos.filter((id) => !estaCache(`partida:${id}`)).length;
-  return { totalSelecionados: todos.length, requisicoesNecessarias };
-}
-
-export async function analisarConfrontoManual({ timeMandanteId, jogosMandanteIds, timeVisitanteId, jogosVisitanteIds }) {
-  const { requisicoesNecessarias } = estimarCustoSelecionados(jogosMandanteIds, jogosVisitanteIds);
-  const restante = LIMITE_DIARIO_API - usoApiHoje();
-
-  if (requisicoesNecessarias > restante) {
-    const err = new Error(
-      `Isso gastaria ${requisicoesNecessarias} requisição(ões) nova(s) à API Futebol, mas só sobram ` +
-        `${restante} hoje (${usoApiHoje()}/${LIMITE_DIARIO_API} usadas). Desmarque alguns jogos ou tente de novo amanhã.`,
-    );
-    err.status = 409;
-    throw err;
-  }
-
-  const [formaMandante, formaVisitante] = await Promise.all([
-    buscarJogosPorId(timeMandanteId, jogosMandanteIds),
-    buscarJogosPorId(timeVisitanteId, jogosVisitanteIds),
-  ]);
-
-  return montarResultadoConfronto(formaMandante, formaVisitante);
-}

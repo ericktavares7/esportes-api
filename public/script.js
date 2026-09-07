@@ -873,6 +873,10 @@ function estimarProbabilidades(mediasMandante, mediasVisitante) {
   let vitoriaMandante = 0;
   let empate = 0;
   let vitoriaVisitante = 0;
+  // Mercados extras (estilo casa de aposta) - saem da mesma grade de Poisson,
+  // só somando outras combinações de placar em vez de comparar i/j.
+  let ambasMarcam = 0;
+  let maisDe25Gols = 0;
 
   for (let i = 0; i <= 8; i++) {
     for (let j = 0; j <= 8; j++) {
@@ -880,6 +884,9 @@ function estimarProbabilidades(mediasMandante, mediasVisitante) {
       if (i > j) vitoriaMandante += probabilidade;
       else if (i === j) empate += probabilidade;
       else vitoriaVisitante += probabilidade;
+
+      if (i >= 1 && j >= 1) ambasMarcam += probabilidade;
+      if (i + j > 2.5) maisDe25Gols += probabilidade;
     }
   }
 
@@ -900,6 +907,8 @@ function estimarProbabilidades(mediasMandante, mediasVisitante) {
     vitoriaVisitante: valores[2],
     xgMandante: Math.round(xgMandante * 10) / 10,
     xgVisitante: Math.round(xgVisitante * 10) / 10,
+    ambasMarcam: Math.round((ambasMarcam / total) * 100),
+    maisDe25Gols: Math.round((maisDe25Gols / total) * 100),
   };
 }
 
@@ -929,6 +938,22 @@ function criarBarraProbabilidade(nomeMandante, nomeVisitante, estimativa) {
     legenda.appendChild(item);
   });
   card.appendChild(legenda);
+
+  if (estimativa.ambasMarcam != null || estimativa.maisDe25Gols != null) {
+    const mercadosExtra = document.createElement('div');
+    mercadosExtra.className = 'prob-mercados-extra';
+    [
+      ['Ambas marcam', estimativa.ambasMarcam],
+      ['Mais de 2.5 gols', estimativa.maisDe25Gols],
+    ].forEach(([label, valor]) => {
+      if (valor == null) return;
+      const chip = document.createElement('span');
+      chip.className = 'mercado-chip';
+      chip.textContent = `${label}: ${valor}%`;
+      mercadosExtra.appendChild(chip);
+    });
+    card.appendChild(mercadosExtra);
+  }
 
   return card;
 }
@@ -1686,7 +1711,7 @@ chatForm?.addEventListener('submit', async (evento) => {
   await enviarMensagemChat(mensagem);
 });
 
-// --- Seleção manual dos jogos usados no histórico (aba Chat) ---
+// --- Selecionar jogo pra analisar (browse por dia, sem escolher histórico) ---
 
 async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
   const campeonatoId = campeonatoSelect.value;
@@ -1697,7 +1722,7 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
 
   modalContent.replaceChildren();
   const titulo = document.createElement('h2');
-  titulo.textContent = 'Selecionar jogos manualmente';
+  titulo.textContent = 'Selecionar jogo pra analisar';
   modalContent.appendChild(titulo);
   const carregando = document.createElement('p');
   carregando.className = 'config-chat-nota';
@@ -1706,44 +1731,45 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
   modalOverlay.classList.add('active');
 
   try {
-    const [campeonatos, status] = await Promise.all([fetchJSON('/api/campeonatos'), fetchJSON('/api/status')]);
+    const campeonatos = await fetchJSON('/api/campeonatos');
     const atual = campeonatos.find((c) => String(c.campeonato_id) === String(campeonatoId));
-    let numeroRodada = atual?.rodada_atual?.rodada;
-    if (!numeroRodada) throw new Error('Este campeonato não tem rodada atual (pode ser mata-mata).');
+    let numero = atual?.rodada_atual?.rodada;
+    if (!numero) throw new Error('Este campeonato não tem rodada atual (pode ser mata-mata).');
 
-    // A rodada "atual" pode já ter terminado (todo mundo agendado virou
-    // resultado) antes da API avançar o ponteiro - segue pra próxima rodada
-    // até achar uma com jogo agendado, ou desistir depois de algumas tentativas.
-    let rodada;
-    let agendados = [];
-    for (let tentativas = 0; tentativas < 4 && agendados.length === 0; tentativas += 1) {
-      rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
-      agendados = (rodada.partidas ?? []).filter((p) => p.status === 'agendado');
-      if (agendados.length === 0) {
-        const proxima = rodada.proxima_rodada?.rodada;
-        if (!proxima) break;
-        numeroRodada = proxima;
-      }
+    // Uma rodada sozinha às vezes só cobre 2-3 dias - junta os agendados de
+    // várias rodadas seguidas (até um limite) pra ter mais dias pra navegar
+    // e aproveitar melhor o espaço da tela.
+    const agendados = [];
+    for (let rodadasLidas = 0; rodadasLidas < 3 && numero; rodadasLidas += 1) {
+      const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numero}`);
+      (rodada.partidas ?? [])
+        .filter((p) => p.status === 'agendado')
+        .forEach((p) => agendados.push({ ...p, _numeroRodada: rodada.rodada }));
+      numero = rodada.proxima_rodada?.rodada;
     }
     if (agendados.length === 0) throw new Error('Não há jogos agendados nas próximas rodadas.');
 
-    montarPickerSelecaoJogos(campeonatoId, numeroRodada, agendados, status.usoApi, quantidadePadrao, aoConfirmar);
+    montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoConfirmar);
   } catch (err) {
     carregando.textContent = `Não foi possível abrir a seleção: ${err.message}`;
     carregando.classList.add('erro');
   }
 }
 
-function montarPickerSelecaoJogos(campeonatoId, numeroRodada, agendados, usoApi, quantidadePadrao, aoConfirmar) {
-  const restanteHoje = usoApi.limite - usoApi.hoje;
-
+function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoConfirmar) {
   modalContent.replaceChildren();
   const titulo = document.createElement('h2');
-  titulo.textContent = 'Selecionar jogos manualmente';
+  titulo.textContent = 'Selecionar jogos pra analisar';
   modalContent.appendChild(titulo);
 
+  const dica = document.createElement('p');
+  dica.className = 'config-chat-nota';
+  dica.textContent = 'Marque um ou mais jogos - selecionar vários monta uma "múltipla" com a estimativa de cada um, calculada separadamente.';
+  modalContent.appendChild(dica);
+
   // Agrupa os agendados por dia (igual a aba Jogos) pra navegar por
-  // "Hoje / Amanhã / Em N dias" em vez de uma lista enorme de confrontos.
+  // "Hoje / Amanhã / Em N dias" mostrando todos os jogos daquele dia. A
+  // seleção (Map por partida_id) persiste entre trocas de dia.
   const grupos = new Map();
   agendados.forEach((partida) => {
     const chave = partida.data_realizacao;
@@ -1751,97 +1777,72 @@ function montarPickerSelecaoJogos(campeonatoId, numeroRodada, agendados, usoApi,
     grupos.get(chave).push(partida);
   });
   const diasChaves = [...grupos.keys()];
+  const selecionados = new Map();
 
   const pillsDias = document.createElement('div');
   pillsDias.className = 'datas-pills selecao-jogos-dias';
   modalContent.appendChild(pillsDias);
 
-  const campoConfronto = document.createElement('label');
-  campoConfronto.textContent = 'Confronto';
-  const selectConfronto = document.createElement('select');
-  campoConfronto.appendChild(selectConfronto);
-  modalContent.appendChild(campoConfronto);
+  const listaJogosDia = document.createElement('div');
+  listaJogosDia.className = 'selecao-jogos-do-dia';
+  modalContent.appendChild(listaJogosDia);
 
-  const areaListas = document.createElement('div');
-  areaListas.className = 'selecao-jogos-listas';
-  modalContent.appendChild(areaListas);
-
-  const infoCusto = document.createElement('p');
-  infoCusto.className = 'config-chat-nota selecao-jogos-custo';
-  modalContent.appendChild(infoCusto);
-
+  const rodape = document.createElement('div');
+  rodape.className = 'selecao-jogos-rodape';
+  const contagem = document.createElement('span');
+  contagem.className = 'selecao-jogos-contagem';
   const btnConfirmar = document.createElement('button');
   btnConfirmar.type = 'button';
   btnConfirmar.className = 'selecao-jogos-confirmar';
-  btnConfirmar.textContent = 'Confirmar e analisar';
-  modalContent.appendChild(btnConfirmar);
+  btnConfirmar.textContent = 'Analisar seleção';
+  btnConfirmar.disabled = true;
+  rodape.append(contagem, btnConfirmar);
+  modalContent.appendChild(rodape);
 
-  let partidasDoDia = [];
+  const status = document.createElement('p');
+  status.className = 'config-chat-nota';
+  modalContent.appendChild(status);
 
-  function atualizarCusto() {
-    const checkboxes = [...areaListas.querySelectorAll('input[type="checkbox"]')];
-    const marcados = checkboxes.filter((cb) => cb.checked);
-    const marcadosMandante = marcados.filter((cb) => cb.dataset.lado === 'mandante');
-    const marcadosVisitante = marcados.filter((cb) => cb.dataset.lado === 'visitante');
-    const custoNovo = marcados.filter((cb) => cb.dataset.emCache !== 'true').length;
-
-    const semSelecao = marcadosMandante.length === 0 || marcadosVisitante.length === 0;
-    infoCusto.textContent = semSelecao
-      ? 'Selecione pelo menos um jogo de cada time.'
-      : `${marcados.length} jogos selecionados - ${custoNovo} requisição(ões) nova(s) à API Futebol ` +
-        `(você tem ${restanteHoje} sobrando hoje, ${usoApi.hoje}/${usoApi.limite} usadas).`;
-
-    const estourou = custoNovo > restanteHoje;
-    infoCusto.classList.toggle('erro', estourou || semSelecao);
-    btnConfirmar.disabled = estourou || semSelecao;
-
-    return { marcadosMandante, marcadosVisitante };
+  function atualizarContagem() {
+    const n = selecionados.size;
+    contagem.textContent = n === 0 ? 'Nenhum jogo selecionado' : n === 1 ? '1 jogo selecionado' : `${n} jogos selecionados`;
+    btnConfirmar.disabled = n === 0;
   }
 
-  async function carregarListasDoConfronto() {
-    const partida = partidasDoDia[Number(selectConfronto.value)];
-    areaListas.replaceChildren();
-    const carregandoListas = document.createElement('p');
-    carregandoListas.className = 'config-chat-nota';
-    carregandoListas.textContent = 'Carregando jogos recentes dos dois times...';
-    areaListas.appendChild(carregandoListas);
-    btnConfirmar.disabled = true;
-
-    try {
-      const [jogosMandante, jogosVisitante] = await Promise.all([
-        fetchJSON(`/api/times/${partida.time_mandante.time_id}/jogos-recentes?campeonato=${campeonatoId}&antes=${numeroRodada}&limite=20`),
-        fetchJSON(`/api/times/${partida.time_visitante.time_id}/jogos-recentes?campeonato=${campeonatoId}&antes=${numeroRodada}&limite=20`),
-      ]);
-
-      areaListas.replaceChildren(
-        criarListaSelecaoTime(partida.time_mandante.nome_popular, 'mandante', jogosMandante, quantidadePadrao, atualizarCusto),
-        criarListaSelecaoTime(partida.time_visitante.nome_popular, 'visitante', jogosVisitante, quantidadePadrao, atualizarCusto),
-      );
-      atualizarCusto();
-    } catch (err) {
-      areaListas.replaceChildren();
-      const erro = document.createElement('p');
-      erro.className = 'config-chat-nota erro';
-      erro.textContent = `Não foi possível carregar os jogos: ${err.message}`;
-      areaListas.appendChild(erro);
-    }
-  }
-
-  function preencherConfrontosDoDia(diaChave) {
-    partidasDoDia = grupos.get(diaChave) ?? [];
-    selectConfronto.replaceChildren();
-    partidasDoDia.forEach((partida, indice) => {
-      const opcao = document.createElement('option');
-      opcao.value = String(indice);
-      opcao.textContent = `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular} - ${partida.hora_realizacao ?? ''}`;
-      selectConfronto.appendChild(opcao);
-    });
-  }
-
-  function selecionarDia(diaChave) {
+  function renderDia(diaChave) {
     pillsDias.querySelectorAll('.data-pill').forEach((p) => p.classList.toggle('active', p.dataset.chave === diaChave));
-    preencherConfrontosDoDia(diaChave);
-    carregarListasDoConfronto();
+    listaJogosDia.replaceChildren();
+
+    (grupos.get(diaChave) ?? []).forEach((partida) => {
+      const linha = document.createElement('div');
+      linha.className = 'jogo-linha selecionavel';
+      if (selecionados.has(partida.partida_id)) linha.classList.add('selecionado');
+      linha.addEventListener('click', () => {
+        if (selecionados.has(partida.partida_id)) {
+          selecionados.delete(partida.partida_id);
+          linha.classList.remove('selecionado');
+        } else {
+          selecionados.set(partida.partida_id, partida);
+          linha.classList.add('selecionado');
+        }
+        atualizarContagem();
+      });
+
+      const marca = document.createElement('span');
+      marca.className = 'selecao-jogos-check';
+
+      const horario = document.createElement('span');
+      horario.className = 'horario';
+      horario.textContent = partida.hora_realizacao ?? '';
+
+      const confrontos = document.createElement('div');
+      confrontos.className = 'confrontos';
+      confrontos.appendChild(timeLinhaJogos(partida.time_mandante));
+      confrontos.appendChild(timeLinhaJogos(partida.time_visitante));
+
+      linha.append(marca, horario, confrontos);
+      listaJogosDia.appendChild(linha);
+    });
   }
 
   diasChaves.forEach((chave) => {
@@ -1857,112 +1858,76 @@ function montarPickerSelecaoJogos(campeonatoId, numeroRodada, agendados, usoApi,
     subrotulo.className = 'pill-data';
     subrotulo.textContent = formatarDataCurta(dataIso);
     pill.append(rotulo, subrotulo);
-    pill.addEventListener('click', () => selecionarDia(chave));
+    pill.addEventListener('click', () => renderDia(chave));
     pillsDias.appendChild(pill);
   });
 
-  selectConfronto.addEventListener('change', carregarListasDoConfronto);
-
   btnConfirmar.addEventListener('click', async () => {
-    const partida = partidasDoDia[Number(selectConfronto.value)];
-    const { marcadosMandante, marcadosVisitante } = atualizarCusto();
-    if (marcadosMandante.length === 0 || marcadosVisitante.length === 0) return;
-
     btnConfirmar.disabled = true;
     btnConfirmar.textContent = 'Analisando...';
+    status.textContent = '';
+    status.classList.remove('erro');
 
-    try {
-      const jogosMandanteIds = marcadosMandante.map((cb) => Number(cb.value));
-      const jogosVisitanteIds = marcadosVisitante.map((cb) => Number(cb.value));
-      const resultado = await fetchJSON('/api/chat/analise-manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timeMandanteId: partida.time_mandante.time_id,
-          jogosMandanteIds,
-          timeVisitanteId: partida.time_visitante.time_id,
-          jogosVisitanteIds,
-        }),
-      });
+    const partidas = [...selecionados.values()];
+    // Promise.allSettled - um jogo sem histórico suficiente não pode derrubar
+    // a múltipla inteira, só fica de fora com um aviso.
+    const resultados = await Promise.allSettled(
+      partidas.map((partida) =>
+        fetchJSON('/api/chat/analise-automatica', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            timeMandanteId: partida.time_mandante.time_id,
+            timeVisitanteId: partida.time_visitante.time_id,
+            numeroRodada: partida._numeroRodada,
+            quantidade: quantidadePadrao,
+          }),
+        }).then((resultado) => ({ partida, resultado })),
+      ),
+    );
 
-      if (resultado.erro) throw new Error(resultado.erro);
+    const pernas = [];
+    let falhas = 0;
+    resultados.forEach((r) => {
+      if (r.status === 'fulfilled' && !r.value.resultado.erro) {
+        pernas.push({ partida: r.value.partida, resultado: r.value.resultado });
+      } else {
+        falhas += 1;
+      }
+    });
 
-      modalOverlay.classList.remove('active');
-      await aoConfirmar(resultado, {
-        campeonatoId,
-        numeroRodada,
-        partida,
-        jogosMandanteIds,
-        jogosVisitanteIds,
-      });
-    } catch (err) {
-      infoCusto.textContent = `Não foi possível analisar: ${err.message}`;
-      infoCusto.classList.add('erro');
-    } finally {
+    if (pernas.length === 0) {
+      status.textContent = 'Não foi possível analisar nenhum dos jogos selecionados.';
+      status.classList.add('erro');
       btnConfirmar.disabled = false;
-      btnConfirmar.textContent = 'Confirmar e analisar';
+      btnConfirmar.textContent = 'Analisar seleção';
+      return;
     }
+
+    modalOverlay.classList.remove('active');
+    if (falhas > 0) mostrarToast(`${falhas} jogo(s) não puderam ser analisados e ficaram de fora.`, 'aviso');
+    await aoConfirmar(pernas);
   });
 
-  selecionarDia(diasChaves[0]);
-}
-
-function criarListaSelecaoTime(nomeTime, lado, jogos, quantidadePadrao, aoMudar) {
-  const bloco = document.createElement('fieldset');
-  bloco.className = 'selecao-jogos-time';
-
-  const legenda = document.createElement('legend');
-  legenda.textContent = nomeTime;
-  bloco.appendChild(legenda);
-
-  if (jogos.length === 0) {
-    const vazio = document.createElement('p');
-    vazio.className = 'config-chat-nota';
-    vazio.textContent = 'Nenhum jogo encerrado encontrado no histórico.';
-    bloco.appendChild(vazio);
-    return bloco;
-  }
-
-  jogos.forEach((jogo, indice) => {
-    const linha = document.createElement('label');
-    linha.className = 'selecao-jogos-item';
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.value = String(jogo.partidaId);
-    checkbox.dataset.lado = lado;
-    checkbox.dataset.emCache = String(jogo.emCache);
-    checkbox.checked = indice < quantidadePadrao;
-    checkbox.addEventListener('change', aoMudar);
-
-    // Não dá pra assumir que o time é sempre mandante ou sempre visitante nos
-    // jogos passados - mostra o placar completo em vez de tentar adivinhar
-    // "o adversário" a partir do lado do confronto que está sendo montado.
-    const textoJogo = document.createElement('span');
-    textoJogo.textContent = `${formatarDataCurta(jogo.data)} — ${jogo.mandante} ${jogo.placarMandante} x ${jogo.placarVisitante} ${jogo.visitante}`;
-
-    const marcaCache = document.createElement('span');
-    marcaCache.className = jogo.emCache ? 'selecao-jogos-cache-ok' : 'selecao-jogos-cache-novo';
-    marcaCache.textContent = jogo.emCache ? 'em cache' : 'nova requisição';
-
-    linha.append(checkbox, textoJogo, marcaCache);
-    bloco.appendChild(linha);
-  });
-
-  return bloco;
+  renderDia(diasChaves[0]);
+  atualizarContagem();
 }
 
 chatSelecionarBtn?.addEventListener('click', () => {
   const config = carregarConfigChat();
-  abrirSelecionarJogos(config.quantidadePadrao, async (resultado, contexto) => {
-    const nomeMandante = contexto.partida.time_mandante.nome_popular;
-    const nomeVisitante = contexto.partida.time_visitante.nome_popular;
+  abrirSelecionarJogos(config.quantidadePadrao, async (pernas) => {
+    const nomesJogos = pernas.map((p) => `${p.partida.time_mandante.nome_popular} x ${p.partida.time_visitante.nome_popular}`);
+    const blocoDados = pernas
+      .map((p, i) => `Jogo ${i + 1} - ${nomesJogos[i]}:\n${JSON.stringify(p.resultado)}`)
+      .join('\n\n');
     const mensagem =
-      `Selecionei manualmente os jogos que quero usar no histórico de ${nomeMandante} x ${nomeVisitante}. ` +
-      `Seguem os dados já calculados a partir exatamente desses jogos:\n\n` +
-      `DADOS PRÉ-CALCULADOS (seleção manual):\n${JSON.stringify(resultado)}\n\n` +
-      `Monte a ficha de análise (vitória/empate/derrota + as chances mais relevantes) usando só esses números.`;
-    await enviarMensagemChat(mensagem, `Palpites de ${nomeMandante} x ${nomeVisitante} (jogos selecionados manualmente)`);
+      (pernas.length > 1
+        ? `Escolhi esses jogos pra analisar (pensando numa múltipla): ${nomesJogos.join(', ')}.`
+        : `Escolhi o jogo ${nomesJogos[0]} pra analisar.`) +
+      ` Seguem os dados já calculados:\n\nDADOS PRÉ-CALCULADOS:\n${blocoDados}\n\n` +
+      `Monte a ficha de análise de cada jogo (vitória/empate/derrota, ambas marcam, mais de 2.5 gols, ` +
+      `e as chances mais relevantes) usando só esses números.`;
+    await enviarMensagemChat(mensagem, pernas.length > 1 ? `Múltipla: ${nomesJogos.join(', ')}` : `Palpites de ${nomesJogos[0]}`);
   });
 });
 
@@ -1999,16 +1964,67 @@ function melhorPalpite(probabilidade, nomeMandante, nomeVisitante) {
   return opcoes.reduce((melhor, atual) => (atual.valor > melhor.valor ? atual : melhor));
 }
 
-function topChances(resultado, nomeMandante, nomeVisitante, quantidade = 3) {
-  const todas = [
-    ...resultado.mandante.chances.map((c) => ({ ...c, time: nomeMandante })),
-    ...resultado.visitante.chances.map((c) => ({ ...c, time: nomeVisitante })),
-  ];
-  return todas.sort((a, b) => b.percentual - a.percentual).slice(0, quantidade);
+function criarBlocoChances(nomeTime, chances) {
+  const bloco = document.createElement('div');
+  bloco.className = 'pesquisado-chances-time';
+
+  const titulo = document.createElement('div');
+  titulo.className = 'pesquisado-chances-titulo';
+  titulo.textContent = nomeTime;
+  bloco.appendChild(titulo);
+
+  const lista = document.createElement('div');
+  lista.className = 'alertas-lista';
+  chances.forEach(({ label, linha, percentual, sufixo }) => {
+    const chip = document.createElement('div');
+    chip.className = 'alerta-chip';
+    const texto = document.createElement('span');
+    texto.textContent = `${label} > ${linha}${sufixo}`;
+    const valor = document.createElement('span');
+    valor.className = 'alerta-percentual';
+    valor.textContent = `${percentual}%`;
+    chip.append(texto, valor);
+    lista.appendChild(chip);
+  });
+  bloco.appendChild(lista);
+
+  return bloco;
+}
+
+function criarBlocoJogoPesquisado(perna, comTitulo) {
+  const { mandante, visitante, resultado } = perna;
+  const bloco = document.createElement('div');
+  bloco.className = 'pesquisado-jogo';
+
+  if (comTitulo) {
+    const tituloJogo = document.createElement('h4');
+    tituloJogo.className = 'pesquisado-jogo-titulo';
+    tituloJogo.textContent = `${mandante.nome} x ${visitante.nome}`;
+    bloco.appendChild(tituloJogo);
+  }
+
+  bloco.appendChild(criarBarraProbabilidade(mandante.nome, visitante.nome, resultado.probabilidade));
+
+  const palpite = melhorPalpite(resultado.probabilidade, mandante.nome, visitante.nome);
+  const sugestao = document.createElement('div');
+  sugestao.className = 'pesquisado-sugestao';
+  sugestao.textContent = `Sugestão: ${palpite.label === 'Empate' ? 'empate' : `vitória de ${palpite.label}`} (${palpite.valor}%)`;
+  bloco.appendChild(sugestao);
+
+  bloco.append(
+    criarBlocoChances(mandante.nome, resultado.mandante.chances),
+    criarBlocoChances(visitante.nome, resultado.visitante.chances),
+  );
+
+  return bloco;
 }
 
 function criarCardPesquisado(entrada) {
-  const { mandante, visitante, resultado } = entrada;
+  // Entradas antigas (salvas antes da múltipla) tinham um único jogo direto
+  // no objeto - normaliza pra sempre trabalhar com um array de "pernas".
+  const pernas = entrada.pernas ?? [
+    { mandante: entrada.mandante, visitante: entrada.visitante, data: entrada.data, resultado: entrada.resultado },
+  ];
 
   const card = document.createElement('div');
   card.className = 'pesquisado-card revelar';
@@ -2018,7 +2034,8 @@ function criarCardPesquisado(entrada) {
   cabecalho.className = 'pesquisado-cabecalho';
   const titulo = document.createElement('div');
   titulo.className = 'pesquisado-titulo';
-  titulo.textContent = `${mandante.nome} x ${visitante.nome}`;
+  titulo.textContent =
+    pernas.length > 1 ? `Múltipla de ${pernas.length} jogos` : `${pernas[0].mandante.nome} x ${pernas[0].visitante.nome}`;
   const btnRemover = document.createElement('button');
   btnRemover.className = 'pesquisado-remover';
   btnRemover.type = 'button';
@@ -2033,33 +2050,19 @@ function criarCardPesquisado(entrada) {
 
   const meta = document.createElement('p');
   meta.className = 'pesquisado-meta';
+  const dataHora = new Date(entrada.criadoEm).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   meta.textContent =
-    `Jogo em ${formatarDataCurta(entrada.data)} · pesquisado em ` +
-    `${new Date(entrada.criadoEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
+    pernas.length > 1
+      ? `Pesquisado em ${dataHora}`
+      : `Jogo em ${formatarDataCurta(pernas[0].data)} · pesquisado em ${dataHora}`;
   card.appendChild(meta);
 
-  card.appendChild(criarBarraProbabilidade(mandante.nome, visitante.nome, resultado.probabilidade));
-
-  const palpite = melhorPalpite(resultado.probabilidade, mandante.nome, visitante.nome);
-  const sugestao = document.createElement('div');
-  sugestao.className = 'pesquisado-sugestao';
-  sugestao.textContent = `Sugestão: ${palpite.label === 'Empate' ? 'empate' : `vitória de ${palpite.label}`} (${palpite.valor}%)`;
-  card.appendChild(sugestao);
-
-  const chancesLista = document.createElement('div');
-  chancesLista.className = 'alertas-lista';
-  topChances(resultado, mandante.nome, visitante.nome).forEach(({ label, linha, percentual, sufixo, time }) => {
-    const chip = document.createElement('div');
-    chip.className = 'alerta-chip';
-    const texto = document.createElement('span');
-    texto.textContent = `${time}: ${label} > ${linha}${sufixo}`;
-    const valor = document.createElement('span');
-    valor.className = 'alerta-percentual';
-    valor.textContent = `${percentual}%`;
-    chip.append(texto, valor);
-    chancesLista.appendChild(chip);
-  });
-  card.appendChild(chancesLista);
+  pernas.forEach((perna) => card.appendChild(criarBlocoJogoPesquisado(perna, pernas.length > 1)));
 
   return card;
 }
@@ -2075,22 +2078,23 @@ function renderJogosPesquisados() {
 }
 
 jogosSelecionarBtn?.addEventListener('click', () => {
-  abrirSelecionarJogos(Number(quantidadeSelect.value), async (resultado, contexto) => {
+  abrirSelecionarJogos(Number(quantidadeSelect.value), async (pernas) => {
     const entrada = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       criadoEm: new Date().toISOString(),
-      campeonatoId: contexto.campeonatoId,
-      numeroRodada: contexto.numeroRodada,
-      data: contexto.partida.data_realizacao_iso ?? contexto.partida.data_realizacao,
-      mandante: { id: contexto.partida.time_mandante.time_id, nome: contexto.partida.time_mandante.nome_popular },
-      visitante: { id: contexto.partida.time_visitante.time_id, nome: contexto.partida.time_visitante.nome_popular },
-      jogosMandanteIds: contexto.jogosMandanteIds,
-      jogosVisitanteIds: contexto.jogosVisitanteIds,
-      resultado,
+      pernas: pernas.map((p) => ({
+        data: p.partida.data_realizacao_iso ?? p.partida.data_realizacao,
+        mandante: { id: p.partida.time_mandante.time_id, nome: p.partida.time_mandante.nome_popular },
+        visitante: { id: p.partida.time_visitante.time_id, nome: p.partida.time_visitante.nome_popular },
+        resultado: p.resultado,
+      })),
     };
     salvarJogoPesquisado(entrada);
     renderJogosPesquisados();
-    mostrarToast('Análise salva em "Jogos Pesquisados".', 'info');
+    mostrarToast(
+      pernas.length > 1 ? `Múltipla de ${pernas.length} jogos salva em "Jogos Pesquisados".` : 'Análise salva em "Jogos Pesquisados".',
+      'info',
+    );
     document.querySelector('.tab-btn[data-tab="pesquisados"]')?.click();
   });
 });

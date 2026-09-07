@@ -1432,85 +1432,6 @@ main {
   filter: brightness(1.1);
 }
 
-/* --- Seleção manual de jogos (aba Chat) --- */
-
-.selecao-jogos-listas {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin: 14px 0;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.selecao-jogos-time {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-
-.selecao-jogos-time legend {
-  padding: 0 6px;
-  font-family: "Space Grotesk", "Segoe UI", sans-serif;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.selecao-jogos-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 4px;
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.selecao-jogos-item input[type='checkbox'] {
-  flex-shrink: 0;
-}
-
-.selecao-jogos-item span:nth-child(2) {
-  flex: 1;
-}
-
-.selecao-jogos-cache-ok {
-  font-size: 11px;
-  color: var(--win);
-  white-space: nowrap;
-}
-
-.selecao-jogos-cache-novo {
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.selecao-jogos-custo.erro {
-  color: var(--red);
-}
-
-.selecao-jogos-confirmar {
-  background: var(--accent);
-  color: #04211e;
-  border: none;
-  border-radius: 8px;
-  padding: 11px 18px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  width: 100%;
-}
-
-.selecao-jogos-confirmar:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.selecao-jogos-confirmar:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .chat-mensagens {
   flex: 1;
   overflow-y: auto;
@@ -1606,6 +1527,89 @@ main {
 
 .selecao-jogos-dias {
   margin-bottom: 14px;
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+.selecao-jogos-do-dia {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.selecao-jogos-do-dia .jogo-linha {
+  cursor: pointer;
+}
+
+.selecao-jogos-do-dia .jogo-linha:first-child {
+  border-top: none;
+}
+
+.selecao-jogos-check {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+}
+
+.jogo-linha.selecionado {
+  background: #16233a;
+}
+
+.jogo-linha.selecionado .selecao-jogos-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  position: relative;
+}
+
+.jogo-linha.selecionado .selecao-jogos-check::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #04211e;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.selecao-jogos-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0 8px;
+}
+
+.selecao-jogos-contagem {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.selecao-jogos-confirmar {
+  background: var(--accent);
+  color: #04211e;
+  border: none;
+  border-radius: 8px;
+  padding: 11px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.selecao-jogos-confirmar:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.selecao-jogos-confirmar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* --- Jogos Pesquisados --- */
@@ -1666,5 +1670,42 @@ main {
   font-size: 12px;
   font-weight: 600;
   margin: 10px 0;
+}
+
+.pesquisado-jogo + .pesquisado-jogo {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.pesquisado-jogo-titulo {
+  margin: 0 0 10px;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.pesquisado-chances-titulo {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 10px 0 6px;
+}
+
+.prob-mercados-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mercado-chip {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
 }
 
