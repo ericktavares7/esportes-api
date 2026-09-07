@@ -47,6 +47,14 @@ export function usoApiHoje() {
   return linha?.requisicoes ?? 0;
 }
 
+// So verifica se uma chave tem copia valida (nao vencida), sem buscar nada
+// nem contar como uso - usado pra estimar custo de requisicao ANTES de
+// decidir se vale a pena buscar (ex: selecao manual de jogos no chat).
+export function estaCache(chave) {
+  const linha = stmtBuscar.get(chave);
+  return Boolean(linha && linha.expira_em > Date.now());
+}
+
 // Padrao "cache-aside" com fallback pra dado velho: tenta ler do SQLite
 // primeiro; se nao tiver ou tiver vencido, chama buscarDados() (a API real).
 // Se a API falhar (ex: cota diaria estourada) mas existir uma copia antiga

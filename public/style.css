@@ -1332,3 +1332,339 @@ main {
   }
 }
 
+/* --- Chat --- */
+
+.tab-panel.chat-secao.active {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 220px);
+  min-height: 420px;
+}
+
+.chat-topo {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.chat-aviso {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  flex: 1;
+}
+
+.chat-config-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-config-btn:hover {
+  border-color: var(--accent);
+}
+
+.config-chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 260px;
+}
+
+.config-chat-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.config-chat-form select,
+.config-chat-form input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.config-chat-form select:focus,
+.config-chat-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.config-chat-nota {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.config-chat-nota.erro {
+  color: var(--red);
+}
+
+.config-chat-form button {
+  background: var(--accent);
+  color: #04211e;
+  border: none;
+  border-radius: 8px;
+  padding: 11px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.config-chat-form button:hover {
+  filter: brightness(1.1);
+}
+
+/* --- Seleção manual de jogos (aba Chat) --- */
+
+.selecao-jogos-listas {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 14px 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.selecao-jogos-time {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.selecao-jogos-time legend {
+  padding: 0 6px;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.selecao-jogos-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.selecao-jogos-item input[type='checkbox'] {
+  flex-shrink: 0;
+}
+
+.selecao-jogos-item span:nth-child(2) {
+  flex: 1;
+}
+
+.selecao-jogos-cache-ok {
+  font-size: 11px;
+  color: var(--win);
+  white-space: nowrap;
+}
+
+.selecao-jogos-cache-novo {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.selecao-jogos-custo.erro {
+  color: var(--red);
+}
+
+.selecao-jogos-confirmar {
+  background: var(--accent);
+  color: #04211e;
+  border: none;
+  border-radius: 8px;
+  padding: 11px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+}
+
+.selecao-jogos-confirmar:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.selecao-jogos-confirmar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-mensagens {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px 12px;
+}
+
+.chat-msg {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.chat-msg.usuario {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #04211e;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-msg.assistente {
+  align-self: flex-start;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-msg.assistente.carregando {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.chat-msg.assistente.erro {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.chat-form {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.chat-form input {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.chat-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chat-form button {
+  background: var(--accent);
+  color: #04211e;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chat-form button:hover {
+  filter: brightness(1.1);
+}
+
+@media (max-width: 640px) {
+  .chat-secao {
+    height: calc(100vh - 180px);
+  }
+
+  .chat-msg {
+    max-width: 90%;
+  }
+}
+
+/* --- Picker de seleção manual dentro do modal --- */
+
+.selecao-jogos-dias {
+  margin-bottom: 14px;
+}
+
+/* --- Jogos Pesquisados --- */
+
+.pesquisados-secao #pesquisados-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pesquisado-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.pesquisado-cabecalho {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pesquisado-titulo {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.pesquisado-remover {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.pesquisado-remover:hover {
+  color: var(--red);
+}
+
+.pesquisado-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 4px 0 12px;
+}
+
+.pesquisado-sugestao {
+  display: inline-block;
+  background: var(--accent-dark);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 10px 0;
+}
+

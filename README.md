@@ -16,6 +16,9 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
    PORT=3000
    API_FUTEBOL_KEY=sua_chave_aqui
    ```
+   As variáveis de IA (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` + seus respectivos
+   `_MODEL`) são opcionais - servem só de fallback no servidor. O normal é configurar a chave direto
+   pela engrenagem (⚙️) da aba **Chat**, que fica salva só no navegador (ver seção Chat abaixo).
 4. Instale as dependências: `npm install`
 5. Rode em modo desenvolvimento (reinicia sozinho a cada alteração): `npm run dev`
 
@@ -33,6 +36,9 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
 | GET | `/api/matches/live` | Jogos acontecendo agora |
 | GET | `/api/matches/:id/summary` | Resumo completo de um jogo: placar, gols, cartões, substituições, escalações e estatísticas |
 | GET | `/api/times/:timeId/forma?campeonato=X&antes=Y&quantidade=5` | Últimos N jogos encerrados do time antes da rodada Y: resultados e médias (gols, escanteios, finalizações, chutes no gol, faltas, posse de bola) |
+| GET | `/api/times/:timeId/jogos-recentes?campeonato=X&antes=Y&limite=20` | Lista os últimos jogos encerrados do time (data, adversário, placar, se já está em cache) **sem** buscar o detalhe estatístico de cada um - usado pra montar a lista de escolha da seleção manual, sem gastar requisição |
+| POST | `/api/chat` | `{ mensagem, historico?, provedor?, apiKey?, modelo?, quantidadePadrao? }` → assistente (Claude/ChatGPT/Gemini) que responde perguntas sobre confrontos usando dados reais das outras rotas (ver seção Chat abaixo) |
+| POST | `/api/chat/analise-manual` | `{ timeMandanteId, jogosMandanteIds, timeVisitanteId, jogosVisitanteIds }` → calcula o mesmo resultado de `analisar_confronto`, mas a partir de uma lista explícita de partidas escolhidas manualmente; nega o pedido se não sobrar cota suficiente pra buscar os jogos ainda não cacheados |
 
 No ambiente de testes (chave `test_...`), os campeonatos disponíveis são: Brasileirão (`id 10`), Copa do Brasil (`id 2`) e Libertadores (`id 7`). Copa do Brasil e Libertadores são mata-mata, então `/rodadas` retorna vazio pra elas (não têm rodadas sequenciais).
 
@@ -92,6 +98,105 @@ Diferente das outras abas, essa **não carrega sozinha** ao trocar de aba — te
 
 Testado com dados reais simulando as respostas da API (`window.fetch` sobrescrito temporariamente) - confirmei o cálculo (ex: Novorizontino 45% vs Avaí, Juventude 38% vs Atlético-GO), a ordenação, a numeração do ranking e o clique abrindo o comparativo certo.
 
+## Chat (aba Chat)
+
+Assistente em linguagem natural: você escreve algo como *"manda pra mim palpites do jogo Náutico x
+Botafogo-SP"* e ele devolve uma análise no estilo ficha de casa de apostas (vitória/empate/derrota +
+chances de escanteios, cartões, gols etc).
+
+### Configuração (engrenagem ⚙️ na aba Chat)
+
+Clicando na engrenagem, dá pra escolher o **provedor de IA** (Claude/Anthropic, ChatGPT/OpenAI ou
+Gemini/Google), colar a **chave de API** da sua conta nesse provedor, opcionalmente trocar o **modelo**
+(cada provedor já vem com um padrão sensato) e escolher quantos **jogos recentes por time** (5/10/15) a
+análise deve usar. Tudo isso fica salvo só no `localStorage` do seu navegador e é enviado direto pro seu
+próprio backend a cada pergunta - nunca passa por nenhum servidor além do seu. Sem chave configurada
+aqui, o servidor tenta usar a variável de ambiente correspondente do `.env` como fallback.
+
+A quantidade de jogos (5/10/15) é decidida uma vez nas configurações, não perguntada em cada mensagem -
+a IA já recebe instrução de usar esse padrão automaticamente sem interromper a conversa pra perguntar,
+a menos que você mesmo peça um número diferente no meio do papo.
+
+### Como funciona (mesmo cálculo, três provedores)
+
+Não importa o provedor escolhido, o modelo **não inventa nenhum número**: ele usa "tool use" (function
+calling) pra chamar duas ferramentas que rodam no seu próprio backend e devolvem dados reais antes de
+responder - a lógica das ferramentas é compartilhada entre os três provedores, só o formato da chamada
+muda (`src/services/chatTools.js`):
+
+- `buscar_jogos_rodada` - lista os jogos de uma rodada (times, IDs, placar) pra achar o confronto que
+  o usuário descreveu, mesmo com nome parcial/apelido.
+- `analisar_confronto` - busca o histórico real dos dois times (`buscarFormaTime`, o mesmo usado no
+  comparativo pré-jogo) e calcula a mesma estimativa de Poisson e as mesmas "Chances" (over/under) das
+  outras abas, em `src/services/estatisticasService.js` - reimplementação em Node do que já existe em
+  `estimarProbabilidades`/`calcularAlertas` no [script.js](public/script.js), pro cálculo ficar
+  determinístico (feito por código) em vez de o modelo "chutar" a conta.
+
+Cada provedor tem seu próprio arquivo de integração, todos reaproveitando as mesmas ferramentas:
+
+| Provedor | Arquivo | SDK | API usada |
+|---|---|---|---|
+| Claude (Anthropic) | `src/services/anthropicChat.js` | `@anthropic-ai/sdk` | Messages API (tool use) |
+| ChatGPT (OpenAI) | `src/services/openaiChat.js` | `openai` | Responses API (function calling) |
+| Gemini (Google) | `src/services/geminiChat.js` | `@google/genai` | Interactions API (function calling) |
+
+`src/services/chatService.js` só escolhe qual dos três chamar, com base no `provedor` enviado pelo
+front-end. O histórico da conversa fica só na memória do navegador (`chatHistorico` no
+[script.js](public/script.js)) e é reenviado a cada pergunta - a API é stateless, não guarda sessão no
+servidor. Como cada provedor guarda o histórico num formato bem diferente (blocos do Claude, itens da
+Responses API, "steps" do Gemini), trocar de provedor no meio da conversa reseta o histórico
+automaticamente em vez de mandar um formato incompatível pro provedor novo. Cada busca de histórico de
+time passa pelo mesmo cache SQLite das outras abas, então perguntar pelo mesmo confronto de novo não
+gasta cota da API Futebol de novo.
+
+**Custo:** cobrança por token na sua própria conta do provedor escolhido, não tem plano incluso. Pra um
+uso pessoal esporádico (algumas perguntas por dia, entre você e seu irmão) o custo tende a ficar na casa
+de centavos por mês, mas depende do modelo - ver a página de preços do provedor escolhido.
+
+### Seleção manual dos jogos (🗂️)
+
+Por padrão o chat usa "os últimos N jogos" (a quantidade configurada na engrenagem, ou o seletor
+"Últimos N jogos" do topo quando a seleção parte da aba Jogos) pra montar o histórico de cada time. O
+botão 🗂️ - na aba Jogos (perto das setas de rodada) e na aba Chat (perto da engrenagem) - abre uma
+alternativa: você escolhe manualmente, jogo a jogo, quais partidas entram no histórico de cada time.
+
+Fluxo: primeiro escolhe o **dia** (pílulas "Amanhã / Em 2 dias / Em 3 dias...", igual a navegação da
+aba Jogos - pula pra próxima rodada automaticamente se a atual já tiver terminado), depois o
+**confronto** daquele dia → o app busca os últimos 20 jogos encerrados de cada time **sem gastar
+requisição** (só usa dados que a listagem de rodadas já traz - nome dos times, data, placar; não busca
+o detalhe estatístico de cada partida) → você marca quais quer incluir, com cada jogo já indicando se
+está "em cache" (0 requisições) ou "nova requisição" → um contador ao vivo mostra quantas requisições
+novas a seleção atual custaria, comparado com quanto ainda resta na cota do dia.
+
+Só ao clicar em "Confirmar e analisar" o app busca de fato o detalhe (estatísticas) dos jogos
+selecionados - e só desses, nada a mais. Antes de buscar, `analisarConfrontoManual` (em
+[chatTools.js](src/services/chatTools.js)) confere de novo quantas dessas partidas ainda não estão em
+cache e compara com o que sobra na cota diária (`LIMITE_DIARIO_API - usoApiHoje()`); se não sobrar
+requisição suficiente, nega o pedido com uma mensagem explicando exatamente quantas faltam, em vez de
+buscar parte dos jogos e travar no meio.
+
+O que acontece com o resultado depende de onde a seleção começou:
+
+- **Pela aba Chat**: vira uma mensagem no chat pedindo pra IA só formatar a ficha (vitória/empate/
+  derrota + chances) - o prompt deixa explícito que, nesse caso, ela não deve chamar as ferramentas de
+  novo, só usar os números já calculados.
+- **Pela aba Jogos**: não passa por nenhuma IA - o resultado é salvo direto na aba **Jogos Pesquisados**
+  (ver abaixo).
+
+## Jogos Pesquisados
+
+Toda análise feita pela seleção manual da aba Jogos vira um card guardado nessa aba, sem precisar de
+IA nem de chave de nenhum provedor - é só o cálculo determinístico (Poisson + Chances) de sempre,
+guardado no `localStorage` do navegador (até 30 mais recentes). Cada card mostra:
+
+- A barra de probabilidade (mesmo componente visual do comparativo pré-jogo)
+- Uma "Sugestão" com o lado de maior probabilidade (vitória de um dos times, ou empate) e o percentual
+- As 3 "Chances" (over/under) mais altas entre os dois times
+- Quando o jogo acontece e quando você pesquisou, com botão pra remover o card
+
+`localStorage` só guarda o texto de quem pesquisou naquele navegador especificamente - não sincroniza
+entre aparelhos nem precisa de conta.
+
 ## Cache local (SQLite)
 
 Toda chamada à API Futebol passa primeiro por um cache em SQLite (`data/cache.sqlite`, criado automaticamente — usa o módulo `node:sqlite` nativo do Node, sem dependência extra). Padrão "cache-aside": se já existe uma cópia válida no banco, ela é usada; senão, busca na API real e salva com um prazo de validade.
@@ -115,15 +220,24 @@ Isso reduz muito o consumo da cota diária da API — essencial no plano Free (1
 ```
 src/
   config/env.js                    variáveis de ambiente
+  config/limites.js                limite diário de requisições da API Futebol
   db/cache.js                      cache local em SQLite (padrão cache-aside)
   services/apiFutebolService.js    chamadas HTTP à API Futebol (passam pelo cache)
-  services/formaService.js         calcula a forma recente (últimos N jogos) de um time
+  services/formaService.js         forma recente de um time - por quantidade ou por seleção manual de jogos
+  services/estatisticasService.js  modelo de Poisson + Chances (mesma lógica do front-end, em Node)
+  services/chatTools.js            ferramentas e prompt do chat, compartilhados pelos 3 provedores
+  services/anthropicChat.js        integração Claude (Anthropic) do chat
+  services/openaiChat.js           integração ChatGPT (OpenAI) do chat
+  services/geminiChat.js           integração Gemini (Google) do chat
+  services/chatService.js          escolhe o provedor de IA e delega pra ele
   controllers/matches.controller.js      lógica das rotas de partidas
   controllers/campeonatos.controller.js  lógica das rotas de campeonatos
   controllers/times.controller.js        lógica da rota de forma recente
+  controllers/chat.controller.js         lógica da rota de chat
   routes/matches.routes.js         definição das rotas de partidas
   routes/campeonatos.routes.js     definição das rotas de campeonatos
   routes/times.routes.js           definição da rota de forma recente
+  routes/chat.routes.js            definição da rota de chat
   app.js                           configuração do Express
   server.js                        ponto de entrada (sobe o servidor)
 ```

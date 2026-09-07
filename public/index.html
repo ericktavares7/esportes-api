@@ -34,10 +34,12 @@
 
   <nav class="tabs">
     <button class="tab-btn active" data-tab="jogos">Jogos</button>
+    <button class="tab-btn" data-tab="pesquisados">Jogos Pesquisados</button>
     <button class="tab-btn" data-tab="tabela">Tabela</button>
     <button class="tab-btn" data-tab="ao-vivo">Ao Vivo</button>
     <button class="tab-btn" data-tab="artilharia">Artilharia</button>
     <button class="tab-btn" data-tab="provaveis">Prováveis</button>
+    <button class="tab-btn" data-tab="chat">Chat</button>
   </nav>
 
   <main>
@@ -46,9 +48,18 @@
         <button id="rodada-anterior" class="rodada-seta" title="Rodada anterior">‹</button>
         <div id="datas-pills" class="datas-pills"></div>
         <button id="rodada-proxima" class="rodada-seta" title="Próxima rodada">›</button>
+        <button id="jogos-selecionar-btn" class="rodada-seta" type="button" title="Selecionar jogos manualmente pra pesquisar">🗂️</button>
       </div>
       <div id="rodada-titulo" class="rodada-titulo"></div>
       <div id="jogos-lista"></div>
+    </section>
+
+    <section id="pesquisados" class="tab-panel pesquisados-secao">
+      <p class="chat-aviso">
+        Jogos que você analisou manualmente (aba Jogos → 🗂️, ou aba Chat → 🗂️) ficam guardados aqui,
+        com a probabilidade e as chances calculadas na hora - sem precisar pedir de novo.
+      </p>
+      <div id="pesquisados-lista"></div>
     </section>
 
     <section id="provaveis" class="tab-panel">
@@ -96,6 +107,23 @@
 
     <section id="artilharia" class="tab-panel">
       <ol id="artilharia-lista" class="artilharia-lista"></ol>
+    </section>
+
+    <section id="chat" class="tab-panel chat-secao">
+      <div class="chat-topo">
+        <p class="chat-aviso">
+          Pergunte por um confronto (ex: "manda palpites do jogo Náutico x Botafogo-SP") e o assistente
+          busca o histórico real dos dois times e monta a estimativa - mesmo modelo das outras abas, só
+          que explicado por texto. Uso pessoal, sem dinheiro envolvido.
+        </p>
+        <button id="chat-selecionar-btn" class="chat-config-btn" type="button" title="Selecionar manualmente os jogos do histórico">🗂️</button>
+        <button id="chat-config-btn" class="chat-config-btn" type="button" title="Configurar IA do chat">⚙️</button>
+      </div>
+      <div id="chat-mensagens" class="chat-mensagens"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" type="text" placeholder="Ex: palpites do jogo Criciúma x Cuiabá" autocomplete="off" />
+        <button type="submit">Enviar</button>
+      </form>
     </section>
   </main>
 

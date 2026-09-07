@@ -4,11 +4,9 @@ import { fileURLToPath } from 'node:url';
 import matchesRouter from './routes/matches.routes.js';
 import campeonatosRouter from './routes/campeonatos.routes.js';
 import timesRouter from './routes/times.routes.js';
+import chatRouter from './routes/chat.routes.js';
 import { usoApiHoje } from './db/cache.js';
-
-// A API Futebol não informa o limite via resposta; esse número reflete o
-// plano atual (visto em /me). Ajuste aqui se o plano mudar.
-const LIMITE_DIARIO_API = 100;
+import { LIMITE_DIARIO_API } from './config/limites.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,12 +31,14 @@ app.get('/api/status', (req, res) => {
 app.use('/api/matches', matchesRouter);
 app.use('/api/campeonatos', campeonatosRouter);
 app.use('/api/times', timesRouter);
+app.use('/api/chat', chatRouter);
 
 // Middleware de erro: fica por último, o Express só chama isso quando
-// algum handler faz next(err). Centraliza o tratamento de falhas da API externa.
+// algum handler faz next(err). Centraliza o tratamento de falhas da API externa
+// (axios, com err.response.status) e de erros próprios (ex: chat, com err.status).
 app.use((err, req, res, next) => {
   console.error(err.message);
-  const status = err.response?.status ?? 500;
+  const status = err.response?.status ?? err.status ?? 500;
   // A API Futebol devolve erros como { message, code }; guarda fallback pro
   // formato antigo ({ errors }) e pra mensagem genérica do axios.
   const detalheExterno = err.response?.data?.message ?? err.response?.data?.errors;
