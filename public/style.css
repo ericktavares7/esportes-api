@@ -1672,6 +1672,17 @@ main {
   margin: 10px 0;
 }
 
+.pesquisado-incompleto {
+  font-size: 12px;
+  color: var(--yellow);
+  background: rgba(219, 163, 39, 0.1);
+  border: 1px solid rgba(219, 163, 39, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
 .pesquisado-jogo + .pesquisado-jogo {
   margin-top: 18px;
   padding-top: 18px;

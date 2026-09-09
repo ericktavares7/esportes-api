@@ -74,6 +74,15 @@ export async function comCache(chave, ttl, buscarDados) {
     stmtSalvar.run(chave, JSON.stringify(dados), agora + ttlSegundos * 1000);
     return dados;
   } catch (err) {
+    // Um erro com resposta HTTP (ex: 429 "limite diário atingido") significa
+    // que a chamada realmente saiu pra API e foi contada do lado deles -
+    // por isso soma aqui também, não só nos sucessos. Erro sem resposta
+    // nenhuma (timeout, DNS, rede caiu) nunca chegou no servidor deles,
+    // então não conta. Sem isso o contador ficava sempre desincronizado do
+    // real assim que a cota estourava, já que toda tentativa passava a falhar.
+    if (err.response) {
+      stmtIncrementarUso.run(diaDeHoje());
+    }
     if (linha) {
       console.log(`[cache] STALE ${chave} (API falhou, usando cópia vencida)`);
       return JSON.parse(linha.valor);

@@ -8,7 +8,7 @@ import { getCampeonatos, getMinhaConta, getRodada } from './apiFutebolService.js
 import { buscarFormaTime } from './formaService.js';
 import { estimarProbabilidades, calcularAlertas } from './estatisticasService.js';
 
-export const SYSTEM_PROMPT = `Você é o assistente do Esportes Analytics, um app pessoal (sem dinheiro
+export const SYSTEM_PROMPT = `Você é o assistente do Sport Analytics, um app pessoal (sem dinheiro
 real, sem apostas de verdade) que o dono usa pra comparar times do Brasileirão Série B com o irmão dele.
 
 Quando o usuário pedir "palpites" ou uma análise de confronto (ex: "manda pra mim palpites do jogo
@@ -39,6 +39,10 @@ Regras importantes:
   no tom (ex: "com base nos últimos N jogos"), sem repetir um aviso jurídico toda hora.
 - Se não achar o jogo, ou um dos times não tiver jogos suficientes no histórico, diga isso direto em
   vez de inventar números.
+- Se um time vier com "incompleto: true" (jogosAnalisados menor que jogosTentados): a cota da API
+  acabou no meio da busca do histórico, então a estimativa usou menos jogos do que o normal. Avise
+  isso rapidamente (ex: "baseado em 6 dos 10 jogos - cota da API acabou no meio da busca") em vez de
+  tratar como se fosse o padrão normal, mas sem dramatizar - é só um aviso de uma linha.
 - Seja direto e objetivo. Formato de ficha, não redação.`;
 
 // Formato neutro (JSON Schema puro) - cada provedor adapta pro seu próprio
@@ -134,18 +138,28 @@ function montarResultadoConfronto(formaMandante, formaVisitante) {
     return { erro: 'Não há jogos suficientes no histórico de um dos dois times.' };
   }
 
+  // jogosTentados só existe quando a forma veio de buscarFormaTime (não da
+  // seleção manual por ID) - se a cota acabou no meio da busca de detalhes,
+  // jogosObtidos fica menor que jogosTentados em vez de derrubar tudo.
+  const incompleto =
+    (formaMandante.jogosTentados ?? formaMandante.medias.jogosAnalisados) > formaMandante.medias.jogosAnalisados ||
+    (formaVisitante.jogosTentados ?? formaVisitante.medias.jogosAnalisados) > formaVisitante.medias.jogosAnalisados;
+
   return {
     mandante: {
       jogosAnalisados: formaMandante.medias.jogosAnalisados,
+      jogosTentados: formaMandante.jogosTentados ?? formaMandante.medias.jogosAnalisados,
       medias: formaMandante.medias,
       chances: calcularAlertas(formaMandante.jogos, formaMandante.medias),
     },
     visitante: {
       jogosAnalisados: formaVisitante.medias.jogosAnalisados,
+      jogosTentados: formaVisitante.jogosTentados ?? formaVisitante.medias.jogosAnalisados,
       medias: formaVisitante.medias,
       chances: calcularAlertas(formaVisitante.jogos, formaVisitante.medias),
     },
     probabilidade: estimarProbabilidades(formaMandante.medias, formaVisitante.medias),
+    incompleto,
   };
 }
 

@@ -23,7 +23,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'Esportes Analytics rodando',
+    message: 'Sport Analytics rodando',
     usoApi: { hoje: usoApiHoje(), limite: LIMITE_DIARIO_API },
   });
 });

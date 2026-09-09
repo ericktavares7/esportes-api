@@ -5,27 +5,46 @@ import { comCache } from '../db/cache.js';
 // depois busca o detalhe completo (com estatísticas) de cada um. O resultado
 // agregado também fica em cache - assim, reabrir o comparativo do mesmo jogo
 // não repete nem a varredura de rodadas nem as chamadas de detalhe.
+//
+// Se a cota acabar no meio da busca dos detalhes, aproveita os jogos que já
+// deu tempo de buscar em vez de descartar tudo (Promise.allSettled, não
+// Promise.all) - cada getPartida() que teve sucesso já ficou cacheado
+// individualmente (1 ano, já que jogo encerrado não muda mais), então uma
+// nova tentativa depois só gasta cota com o que ainda faltou. Por isso um
+// resultado incompleto pega um TTL bem mais curto (2 min em vez de 30) - a
+// próxima vez que alguém pedir essa forma, tenta completar de novo cedo.
 export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade = 5) {
   const chave = `forma:${campeonatoId}:${timeId}:${antesRodada}:${quantidade}`;
 
-  return comCache(chave, 30 * 60, async () => {
-    const jogosEncontrados = [];
-    let numero = antesRodada - 1;
+  return comCache(
+    chave,
+    (dados) => (dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60),
+    async () => {
+      const jogosEncontrados = [];
+      let numero = antesRodada - 1;
 
-    while (numero >= 1 && jogosEncontrados.length < quantidade) {
-      const rodada = await getRodada(campeonatoId, numero);
-      const partidaDoTime = (rodada.partidas ?? []).find(
-        (p) => p.status === 'finalizado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
-      );
-      if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
-      numero -= 1;
-    }
+      while (numero >= 1 && jogosEncontrados.length < quantidade) {
+        const rodada = await getRodada(campeonatoId, numero);
+        const partidaDoTime = (rodada.partidas ?? []).find(
+          (p) => p.status === 'finalizado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
+        );
+        if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
+        numero -= 1;
+      }
 
-    const detalhes = await Promise.all(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
-    const jogos = detalhes.map((partida) => montarLinhaForma(partida, timeId));
+      const resultados = await Promise.allSettled(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
+      const jogos = resultados
+        .filter((r) => r.status === 'fulfilled')
+        .map((r) => montarLinhaForma(r.value, timeId));
 
-    return { jogos, medias: calcularMedias(jogos) };
-  });
+      return {
+        jogos,
+        medias: calcularMedias(jogos),
+        jogosTentados: jogosEncontrados.length,
+        jogosObtidos: jogos.length,
+      };
+    },
+  );
 }
 
 function montarLinhaForma(partida, timeId) {

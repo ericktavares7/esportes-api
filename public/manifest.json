@@ -1,6 +1,6 @@
 {
-  "name": "Esportes Analytics",
-  "short_name": "Esportes",
+  "name": "Sport Analytics",
+  "short_name": "Sport",
   "description": "Jogos, tabela, ao vivo e comparativos do futebol brasileiro",
   "start_url": "/",
   "display": "standalone",

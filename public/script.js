@@ -41,6 +41,13 @@ function comRevelacao(elemento) {
 
 async function fetchJSON(url, options) {
   const resposta = await fetch(url, options);
+
+  // Atualiza o badge de cota depois de qualquer chamada (menos /api/status
+  // em si, senão vira loop) - assim ele reflete a cota real sem precisar
+  // recarregar a página. Não usa "await": é só pra refrescar o número no
+  // canto, não deve atrasar a resposta que quem chamou está esperando.
+  if (url !== '/api/status') carregarUsoApi();
+
   if (!resposta.ok) {
     const corpo = await resposta.json().catch(() => null);
     const detalhe = corpo?.detail ?? corpo?.error ?? `HTTP ${resposta.status}`;
@@ -1738,16 +1745,27 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
 
     // Uma rodada sozinha às vezes só cobre 2-3 dias - junta os agendados de
     // várias rodadas seguidas (até um limite) pra ter mais dias pra navegar
-    // e aproveitar melhor o espaço da tela.
+    // e aproveitar melhor o espaço da tela. Uma rodada que falhar (sem cache
+    // e sem cota) não pode travar a busca inteira - tenta a rodada seguinte
+    // (numero + 1, já que não temos o proxima_rodada de uma leitura que
+    // falhou) em vez de desistir na primeira que der errado.
     const agendados = [];
-    for (let rodadasLidas = 0; rodadasLidas < 3 && numero; rodadasLidas += 1) {
-      const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numero}`);
-      (rodada.partidas ?? [])
-        .filter((p) => p.status === 'agendado')
-        .forEach((p) => agendados.push({ ...p, _numeroRodada: rodada.rodada }));
-      numero = rodada.proxima_rodada?.rodada;
+    let ultimoErro = null;
+    let rodadasLidas = 0;
+    for (let tentativas = 0; rodadasLidas < 3 && numero && tentativas < 6; tentativas += 1) {
+      try {
+        const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numero}`);
+        (rodada.partidas ?? [])
+          .filter((p) => p.status === 'agendado')
+          .forEach((p) => agendados.push({ ...p, _numeroRodada: rodada.rodada }));
+        numero = rodada.proxima_rodada?.rodada ?? null;
+        rodadasLidas += 1;
+      } catch (err) {
+        ultimoErro = err;
+        numero += 1;
+      }
     }
-    if (agendados.length === 0) throw new Error('Não há jogos agendados nas próximas rodadas.');
+    if (agendados.length === 0) throw ultimoErro ?? new Error('Não há jogos agendados nas próximas rodadas.');
 
     montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoConfirmar);
   } catch (err) {
@@ -2001,6 +2019,19 @@ function criarBlocoJogoPesquisado(perna, comTitulo) {
     tituloJogo.className = 'pesquisado-jogo-titulo';
     tituloJogo.textContent = `${mandante.nome} x ${visitante.nome}`;
     bloco.appendChild(tituloJogo);
+  }
+
+  if (resultado.incompleto) {
+    const partes = [resultado.mandante, resultado.visitante]
+      .map((lado, i) => ({ lado, nome: i === 0 ? mandante.nome : visitante.nome }))
+      .filter(({ lado }) => lado.jogosAnalisados < lado.jogosTentados)
+      .map(({ lado, nome }) => `${nome} (${lado.jogosAnalisados} de ${lado.jogosTentados})`);
+    const aviso = document.createElement('p');
+    aviso.className = 'pesquisado-incompleto';
+    aviso.textContent =
+      `⚠️ Cota da API acabou no meio da busca - ${partes.join(', ')}. Analisar esse confronto de novo ` +
+      `mais tarde completa automaticamente o que faltou.`;
+    bloco.appendChild(aviso);
   }
 
   bloco.appendChild(criarBarraProbabilidade(mandante.nome, visitante.nome, resultado.probabilidade));
