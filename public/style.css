@@ -1614,6 +1614,49 @@ main {
 
 /* --- Jogos Pesquisados --- */
 
+.pesquisados-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.pesquisados-acao-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pesquisados-acao-btn:hover {
+  border-color: var(--accent);
+}
+
+.pesquisados-acao-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pesquisados-acao-btn.ativo {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dark);
+}
+
+.acertometro {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+
 .pesquisados-secao #pesquisados-lista {
   display: flex;
   flex-direction: column;
@@ -1641,14 +1684,29 @@ main {
   color: var(--text);
 }
 
-.pesquisado-remover {
+.pesquisado-acoes-card {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pesquisado-icone-btn {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 4px 6px;
+}
+
+.pesquisado-icone-btn:hover {
+  color: var(--text);
+}
+
+.pesquisado-remover {
+  font-size: 18px;
 }
 
 .pesquisado-remover:hover {
@@ -1661,6 +1719,32 @@ main {
   margin: 4px 0 12px;
 }
 
+.pesquisado-sugestao-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.pesquisado-resultado {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pesquisado-resultado.acertou {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--win);
+}
+
+.pesquisado-resultado.errou {
+  background: rgba(225, 90, 82, 0.12);
+  color: var(--red);
+}
+
 .pesquisado-sugestao {
   display: inline-block;
   background: var(--accent-dark);
@@ -1669,7 +1753,6 @@ main {
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 600;
-  margin: 10px 0;
 }
 
 .pesquisado-incompleto {
@@ -1679,6 +1762,13 @@ main {
   border: 1px solid rgba(219, 163, 39, 0.3);
   border-radius: 8px;
   padding: 8px 12px;
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+.pesquisado-contexto {
+  font-size: 12px;
+  color: var(--text-dim);
   margin: 0 0 10px;
   line-height: 1.4;
 }
@@ -1704,11 +1794,22 @@ main {
   margin: 10px 0 6px;
 }
 
+.prob-palpites-fortes {
+  margin-top: 12px;
+}
+
+.prob-palpites-titulo {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 6px;
+}
+
 .prob-mercados-extra {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
 }
 
 .mercado-chip {
@@ -1718,5 +1819,12 @@ main {
   padding: 5px 12px;
   font-size: 12px;
   color: var(--text);
+}
+
+.mercado-chip-forte {
+  background: var(--accent-dark);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }
 

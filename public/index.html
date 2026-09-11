@@ -59,6 +59,15 @@
         Jogos que você analisou manualmente (aba Jogos → 🗂️, ou aba Chat → 🗂️) ficam guardados aqui,
         com a probabilidade e as chances calculadas na hora - sem precisar pedir de novo.
       </p>
+      <div class="pesquisados-acoes">
+        <button id="conferir-resultados-btn" type="button" class="pesquisados-acao-btn">
+          ✅ Conferir resultados
+        </button>
+        <button id="notificar-btn" type="button" class="pesquisados-acao-btn">
+          🔔 Avisar 30 min antes
+        </button>
+      </div>
+      <div id="acertometro" class="acertometro" hidden></div>
       <div id="pesquisados-lista"></div>
     </section>
 
@@ -134,6 +143,7 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

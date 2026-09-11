@@ -13,8 +13,10 @@ import { comCache } from '../db/cache.js';
 // nova tentativa depois só gasta cota com o que ainda faltou. Por isso um
 // resultado incompleto pega um TTL bem mais curto (2 min em vez de 30) - a
 // próxima vez que alguém pedir essa forma, tenta completar de novo cedo.
-export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade = 5) {
-  const chave = `forma:${campeonatoId}:${timeId}:${antesRodada}:${quantidade}`;
+// apenasComoMandante: true = só jogos em casa, false = só jogos fora,
+// null/undefined = mistura os dois (comportamento original).
+export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade = 5, apenasComoMandante = null) {
+  const chave = `forma:${campeonatoId}:${timeId}:${antesRodada}:${quantidade}:${apenasComoMandante}`;
 
   return comCache(
     chave,
@@ -25,9 +27,15 @@ export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantid
 
       while (numero >= 1 && jogosEncontrados.length < quantidade) {
         const rodada = await getRodada(campeonatoId, numero);
-        const partidaDoTime = (rodada.partidas ?? []).find(
-          (p) => p.status === 'finalizado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
-        );
+        const partidaDoTime = (rodada.partidas ?? []).find((p) => {
+          if (p.status !== 'finalizado') return false;
+          const ehMandante = p.time_mandante.time_id === timeId;
+          const ehVisitante = p.time_visitante.time_id === timeId;
+          if (!ehMandante && !ehVisitante) return false;
+          if (apenasComoMandante === true && !ehMandante) return false;
+          if (apenasComoMandante === false && !ehVisitante) return false;
+          return true;
+        });
         if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
         numero -= 1;
       }
@@ -45,6 +53,24 @@ export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantid
       };
     },
   );
+}
+
+// Prioriza o histórico específico de mando de campo (só jogos em casa pro
+// mandante, só jogos fora pro visitante) - times costumam jogar bem
+// diferente em casa e fora, então misturar os dois numa média só mascara
+// isso. Se não houver jogos suficientes nesse recorte (início de temporada,
+// time recém-promovido etc), cai pro histórico geral em vez de travar com
+// pouquíssima amostra - e avisa que usou o geral via `mandoEspecifico: false`.
+const AMOSTRA_MINIMA_MANDO = 4;
+
+export async function buscarFormaComMando(campeonatoId, timeId, antesRodada, quantidade, comoMandante) {
+  const especifico = await buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade, comoMandante);
+  if (especifico.jogosObtidos >= Math.min(AMOSTRA_MINIMA_MANDO, quantidade)) {
+    return { ...especifico, mandoEspecifico: true };
+  }
+
+  const geral = await buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade, null);
+  return { ...geral, mandoEspecifico: false };
 }
 
 function montarLinhaForma(partida, timeId) {

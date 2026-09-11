@@ -20,6 +20,9 @@ const chatConfigBtn = document.getElementById('chat-config-btn');
 const chatSelecionarBtn = document.getElementById('chat-selecionar-btn');
 const jogosSelecionarBtn = document.getElementById('jogos-selecionar-btn');
 const pesquisadosLista = document.getElementById('pesquisados-lista');
+const conferirResultadosBtn = document.getElementById('conferir-resultados-btn');
+const notificarBtn = document.getElementById('notificar-btn');
+const acertometroEl = document.getElementById('acertometro');
 
 let rodadaExibida = null;
 
@@ -946,23 +949,56 @@ function criarBarraProbabilidade(nomeMandante, nomeVisitante, estimativa) {
   });
   card.appendChild(legenda);
 
-  if (estimativa.ambasMarcam != null || estimativa.maisDe25Gols != null) {
-    const mercadosExtra = document.createElement('div');
-    mercadosExtra.className = 'prob-mercados-extra';
-    [
-      ['Ambas marcam', estimativa.ambasMarcam],
-      ['Mais de 2.5 gols', estimativa.maisDe25Gols],
-    ].forEach(([label, valor]) => {
-      if (valor == null) return;
+  const fortes = palpitesFortes(estimativa, nomeMandante, nomeVisitante);
+  if (fortes.length > 0) {
+    const bloco = document.createElement('div');
+    bloco.className = 'prob-palpites-fortes';
+
+    const titulo = document.createElement('div');
+    titulo.className = 'prob-palpites-titulo';
+    titulo.textContent = 'Palpites fortes';
+    bloco.appendChild(titulo);
+
+    const lista = document.createElement('div');
+    lista.className = 'prob-mercados-extra';
+    fortes.forEach(({ label, valor }) => {
       const chip = document.createElement('span');
-      chip.className = 'mercado-chip';
+      chip.className = 'mercado-chip mercado-chip-forte';
       chip.textContent = `${label}: ${valor}%`;
-      mercadosExtra.appendChild(chip);
+      lista.appendChild(chip);
     });
-    card.appendChild(mercadosExtra);
+    bloco.appendChild(lista);
+    card.appendChild(bloco);
+  } else {
+    const semForte = document.createElement('p');
+    semForte.className = 'prob-nota';
+    semForte.textContent = 'Nenhum palpite forte pra esse jogo - times parecem equilibrados.';
+    card.appendChild(semForte);
   }
 
   return card;
+}
+
+// Junta todos os mercados calculados (vitória/empate/derrota, ambas marcam,
+// mais/menos de 2.5 gols) e devolve só os que passam de um limiar de
+// confiança, do maior pro menor - em vez de sempre mostrar os mesmos
+// números fixos (tipo "ambas marcam") mesmo quando o jogo não indica nada
+// forte de um lado ou de outro.
+function palpitesFortes(estimativa, nomeMandante, nomeVisitante, limiar = 60) {
+  const candidatos = [
+    { label: `Vitória de ${nomeMandante}`, valor: estimativa.vitoriaMandante },
+    { label: 'Empate', valor: estimativa.empate },
+    { label: `Vitória de ${nomeVisitante}`, valor: estimativa.vitoriaVisitante },
+  ];
+  if (estimativa.ambasMarcam != null) {
+    candidatos.push({ label: 'Ambas marcam', valor: estimativa.ambasMarcam });
+    candidatos.push({ label: 'Não ambas marcam', valor: 100 - estimativa.ambasMarcam });
+  }
+  if (estimativa.maisDe25Gols != null) {
+    candidatos.push({ label: 'Mais de 2.5 gols', valor: estimativa.maisDe25Gols });
+    candidatos.push({ label: 'Menos de 2.5 gols', valor: 100 - estimativa.maisDe25Gols });
+  }
+  return candidatos.filter((c) => c.valor >= limiar).sort((a, b) => b.valor - a.valor);
 }
 
 function secaoProbabilidade(nomeMandante, nomeVisitante, mediasMandante, mediasVisitante) {
@@ -1906,16 +1942,27 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
 
     const pernas = [];
     let falhas = 0;
+    let incompletos = 0;
     resultados.forEach((r) => {
-      if (r.status === 'fulfilled' && !r.value.resultado.erro) {
-        pernas.push({ partida: r.value.partida, resultado: r.value.resultado });
-      } else {
+      if (r.status !== 'fulfilled' || r.value.resultado.erro) {
         falhas += 1;
+        return;
       }
+      // Só entram jogos com o histórico 100% completo - um jogo que ficou
+      // pela metade porque a cota acabou no meio da busca fica de fora em
+      // vez de aparecer com um aviso, a pedido explícito do usuário.
+      if (r.value.resultado.incompleto) {
+        incompletos += 1;
+        return;
+      }
+      pernas.push({ partida: r.value.partida, resultado: r.value.resultado });
     });
 
     if (pernas.length === 0) {
-      status.textContent = 'Não foi possível analisar nenhum dos jogos selecionados.';
+      status.textContent =
+        incompletos > 0
+          ? `Nenhum jogo com histórico 100% completo - ${incompletos} ficaram incompletos (cota da API acabou no meio da busca).`
+          : 'Não foi possível analisar nenhum dos jogos selecionados.';
       status.classList.add('erro');
       btnConfirmar.disabled = false;
       btnConfirmar.textContent = 'Analisar seleção';
@@ -1923,7 +1970,12 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
     }
 
     modalOverlay.classList.remove('active');
-    if (falhas > 0) mostrarToast(`${falhas} jogo(s) não puderam ser analisados e ficaram de fora.`, 'aviso');
+    if (falhas > 0 || incompletos > 0) {
+      const partes = [];
+      if (incompletos > 0) partes.push(`${incompletos} incompleto(s) (cota acabou no meio da busca)`);
+      if (falhas > 0) partes.push(`${falhas} não puderam ser analisados`);
+      mostrarToast(`${partes.join(', ')} - ficaram de fora.`, 'aviso');
+    }
     await aoConfirmar(pernas);
   });
 
@@ -1982,6 +2034,81 @@ function melhorPalpite(probabilidade, nomeMandante, nomeVisitante) {
   return opcoes.reduce((melhor, atual) => (atual.valor > melhor.valor ? atual : melhor));
 }
 
+// --- Acertômetro: confere a Sugestão salva contra o placar real do jogo ---
+
+function resultadoRealLabel(placarMandante, placarVisitante, nomeMandante, nomeVisitante) {
+  if (placarMandante > placarVisitante) return nomeMandante;
+  if (placarMandante < placarVisitante) return nomeVisitante;
+  return 'Empate';
+}
+
+async function conferirResultados() {
+  const lista = carregarJogosPesquisados();
+  let conferidos = 0;
+  let semDadoAinda = 0;
+
+  for (const entrada of lista) {
+    const pernas = entrada.pernas ?? [entrada];
+    for (const perna of pernas) {
+      if (!perna.partidaId || perna.conferido) continue;
+
+      try {
+        const info = await fetchJSON(`/api/matches/${perna.partidaId}/resultado`);
+        if (info.status !== 'finalizado') {
+          semDadoAinda += 1;
+          continue;
+        }
+        const palpite = melhorPalpite(perna.resultado.probabilidade, perna.mandante.nome, perna.visitante.nome);
+        const real = resultadoRealLabel(info.placarMandante, info.placarVisitante, perna.mandante.nome, perna.visitante.nome);
+        perna.conferido = true;
+        perna.placarReal = { mandante: info.placarMandante, visitante: info.placarVisitante };
+        perna.acertou = palpite.label === real;
+        conferidos += 1;
+      } catch {
+        // um jogo que falhar (sem cache, cota esgotada) só fica pra tentar de novo depois
+      }
+    }
+  }
+
+  if (conferidos > 0) {
+    localStorage.setItem(PESQUISADOS_CHAVE, JSON.stringify(lista));
+    renderJogosPesquisados();
+  }
+
+  if (conferidos === 0 && semDadoAinda === 0) {
+    mostrarToast('Nada novo pra conferir - todos os jogos salvos já foram checados ou ainda não têm partidaId salvo.', 'info');
+  } else if (conferidos === 0) {
+    mostrarToast(`${semDadoAinda} jogo(s) ainda não terminaram - confere de novo depois.`, 'info');
+  } else {
+    mostrarToast(`${conferidos} resultado(s) conferido(s)${semDadoAinda > 0 ? `, ${semDadoAinda} ainda não terminaram` : ''}.`, 'info');
+  }
+}
+
+function renderAcertometro() {
+  const lista = carregarJogosPesquisados();
+  const pernasConferidas = lista.flatMap((e) => (e.pernas ?? [e])).filter((p) => p.conferido);
+
+  if (pernasConferidas.length === 0) {
+    acertometroEl.hidden = true;
+    return;
+  }
+
+  const acertos = pernasConferidas.filter((p) => p.acertou).length;
+  const total = pernasConferidas.length;
+  const pct = Math.round((acertos / total) * 100);
+  acertometroEl.hidden = false;
+  acertometroEl.textContent = `Acertômetro: ${acertos} de ${total} sugestões bateram com o resultado real (${pct}%)`;
+}
+
+conferirResultadosBtn?.addEventListener('click', () => {
+  conferirResultadosBtn.disabled = true;
+  conferirResultadosBtn.textContent = 'Conferindo...';
+  conferirResultados().finally(() => {
+    conferirResultadosBtn.disabled = false;
+    conferirResultadosBtn.textContent = '✅ Conferir resultados';
+  });
+});
+
 function criarBlocoChances(nomeTime, chances) {
   const bloco = document.createElement('div');
   bloco.className = 'pesquisado-chances-time';
@@ -2021,6 +2148,15 @@ function criarBlocoJogoPesquisado(perna, comTitulo) {
     bloco.appendChild(tituloJogo);
   }
 
+  if (resultado.mandante.contexto || resultado.visitante.contexto) {
+    const contexto = document.createElement('p');
+    contexto.className = 'pesquisado-contexto';
+    contexto.textContent = [resultado.mandante.contexto?.descricao, resultado.visitante.contexto?.descricao]
+      .filter(Boolean)
+      .join(' · ');
+    bloco.appendChild(contexto);
+  }
+
   if (resultado.incompleto) {
     const partes = [resultado.mandante, resultado.visitante]
       .map((lado, i) => ({ lado, nome: i === 0 ? mandante.nome : visitante.nome }))
@@ -2034,13 +2170,43 @@ function criarBlocoJogoPesquisado(perna, comTitulo) {
     bloco.appendChild(aviso);
   }
 
+  // Times sem jogos suficientes jogando em casa/fora especificamente caem
+  // pro histórico geral (misturando casa+fora) - e amostra pequena (menos
+  // de 4 jogos) deixa a estimativa menos confiável. Ambos casos avisados
+  // aqui pra não passar confiança maior do que os dados realmente sustentam.
+  const ressalvas = [resultado.mandante, resultado.visitante]
+    .map((lado, i) => ({ lado, nome: i === 0 ? mandante.nome : visitante.nome }))
+    .filter(({ lado }) => lado.mandoEspecifico === false || lado.amostraPequena)
+    .map(({ lado, nome }) => {
+      const motivos = [];
+      if (lado.mandoEspecifico === false) motivos.push('sem jogos suficientes nesse mando, usando histórico geral');
+      if (lado.amostraPequena) motivos.push(`amostra pequena (${lado.jogosAnalisados} jogos)`);
+      return `${nome} (${motivos.join(', ')})`;
+    });
+  if (ressalvas.length > 0) {
+    const aviso = document.createElement('p');
+    aviso.className = 'pesquisado-incompleto';
+    aviso.textContent = `ℹ️ ${ressalvas.join(' · ')}.`;
+    bloco.appendChild(aviso);
+  }
+
   bloco.appendChild(criarBarraProbabilidade(mandante.nome, visitante.nome, resultado.probabilidade));
 
   const palpite = melhorPalpite(resultado.probabilidade, mandante.nome, visitante.nome);
+  const linhaSugestao = document.createElement('div');
+  linhaSugestao.className = 'pesquisado-sugestao-linha';
   const sugestao = document.createElement('div');
   sugestao.className = 'pesquisado-sugestao';
   sugestao.textContent = `Sugestão: ${palpite.label === 'Empate' ? 'empate' : `vitória de ${palpite.label}`} (${palpite.valor}%)`;
-  bloco.appendChild(sugestao);
+  linhaSugestao.appendChild(sugestao);
+
+  if (perna.conferido) {
+    const badge = document.createElement('div');
+    badge.className = `pesquisado-resultado ${perna.acertou ? 'acertou' : 'errou'}`;
+    badge.textContent = `${perna.acertou ? '✅ Acertou' : '❌ Errou'} - ${perna.placarReal.mandante} x ${perna.placarReal.visitante}`;
+    linhaSugestao.appendChild(badge);
+  }
+  bloco.appendChild(linhaSugestao);
 
   bloco.append(
     criarBlocoChances(mandante.nome, resultado.mandante.chances),
@@ -2067,8 +2233,18 @@ function criarCardPesquisado(entrada) {
   titulo.className = 'pesquisado-titulo';
   titulo.textContent =
     pernas.length > 1 ? `Múltipla de ${pernas.length} jogos` : `${pernas[0].mandante.nome} x ${pernas[0].visitante.nome}`;
+  const acoes = document.createElement('div');
+  acoes.className = 'pesquisado-acoes-card';
+
+  const btnCompartilhar = document.createElement('button');
+  btnCompartilhar.className = 'pesquisado-icone-btn';
+  btnCompartilhar.type = 'button';
+  btnCompartilhar.title = 'Compartilhar como imagem';
+  btnCompartilhar.textContent = '📤';
+  btnCompartilhar.addEventListener('click', () => compartilharCard(card, titulo.textContent));
+
   const btnRemover = document.createElement('button');
-  btnRemover.className = 'pesquisado-remover';
+  btnRemover.className = 'pesquisado-icone-btn pesquisado-remover';
   btnRemover.type = 'button';
   btnRemover.title = 'Remover';
   btnRemover.textContent = '×';
@@ -2076,7 +2252,9 @@ function criarCardPesquisado(entrada) {
     removerJogoPesquisado(entrada.id);
     renderJogosPesquisados();
   });
-  cabecalho.append(titulo, btnRemover);
+
+  acoes.append(btnCompartilhar, btnRemover);
+  cabecalho.append(titulo, acoes);
   card.appendChild(cabecalho);
 
   const meta = document.createElement('p');
@@ -2100,6 +2278,7 @@ function criarCardPesquisado(entrada) {
 
 function renderJogosPesquisados() {
   const lista = carregarJogosPesquisados();
+  renderAcertometro();
   pesquisadosLista.replaceChildren();
   if (lista.length === 0) {
     pesquisadosLista.appendChild(linhaVazia('Nenhum jogo pesquisado ainda - use o 🗂️ na aba Jogos ou no Chat.'));
@@ -2108,12 +2287,152 @@ function renderJogosPesquisados() {
   lista.forEach((entrada) => pesquisadosLista.appendChild(criarCardPesquisado(entrada)));
 }
 
+// --- Compartilhar um card como imagem (ex: mandar no zap) ---
+
+async function compartilharCard(elementoCard, nomeArquivo) {
+  if (typeof html2canvas !== 'function') {
+    mostrarToast('Não foi possível gerar a imagem agora (biblioteca não carregou).', 'aviso');
+    return;
+  }
+
+  const acoes = elementoCard.querySelector('.pesquisado-acoes-card');
+  acoes.style.visibility = 'hidden';
+  let canvas;
+  try {
+    canvas = await html2canvas(elementoCard, { backgroundColor: '#101a2b', scale: 2 });
+  } catch {
+    mostrarToast('Não foi possível gerar a imagem desse card.', 'aviso');
+    return;
+  } finally {
+    acoes.style.visibility = '';
+  }
+
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    const nomeArquivoLimpo = `${nomeArquivo.replace(/[^\w\s-]/g, '')}.png`;
+    const arquivo = new File([blob], nomeArquivoLimpo, { type: 'image/png' });
+
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try {
+        await navigator.share({ files: [arquivo], title: nomeArquivo });
+        return;
+      } catch {
+        // usuário cancelou o compartilhamento ou o navegador recusou - cai pro download
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nomeArquivoLimpo;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+// --- Aviso "faltam 30 min" pros jogos salvos ---
+//
+// Só funciona com o app aberto (aba ou PWA rodando) - notificação de
+// verdade com o app fechado exigiria service worker + push do servidor,
+// o que não é confiável num plano free que dorme sozinho (Render). Isso
+// aqui é um aviso local, checado a cada minuto enquanto o app está aberto.
+
+const NOTIFICACOES_ATIVAS_CHAVE = 'esportesAnalyticsNotificacoesAtivas';
+const NOTIFICADOS_CHAVE = 'esportesAnalyticsNotificados';
+const MINUTOS_ANTES_AVISO = 30;
+let intervaloLembretes = null;
+
+function notificacoesAtivas() {
+  return localStorage.getItem(NOTIFICACOES_ATIVAS_CHAVE) === 'true';
+}
+
+function carregarNotificados() {
+  try {
+    const lista = JSON.parse(localStorage.getItem(NOTIFICADOS_CHAVE));
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function marcarNotificado(partidaId) {
+  const lista = carregarNotificados();
+  lista.push(partidaId);
+  localStorage.setItem(NOTIFICADOS_CHAVE, JSON.stringify(lista.slice(-200)));
+}
+
+function verificarLembretes() {
+  if (!notificacoesAtivas() || Notification.permission !== 'granted') return;
+
+  const jaNotificados = new Set(carregarNotificados());
+  const agora = Date.now();
+  const lista = carregarJogosPesquisados();
+
+  lista.forEach((entrada) => {
+    (entrada.pernas ?? [entrada]).forEach((perna) => {
+      if (!perna.partidaId || !perna.data || jaNotificados.has(perna.partidaId)) return;
+      const minutosParaComecar = (new Date(perna.data).getTime() - agora) / 60000;
+      if (minutosParaComecar > 0 && minutosParaComecar <= MINUTOS_ANTES_AVISO) {
+        new Notification('Faltam 30 min ⏰', {
+          body: `${perna.mandante.nome} x ${perna.visitante.nome} começa daqui a pouco.`,
+          icon: '/icon.svg',
+        });
+        marcarNotificado(perna.partidaId);
+      }
+    });
+  });
+}
+
+function atualizarBotaoNotificar() {
+  if (!notificarBtn) return;
+  const ativo = notificacoesAtivas() && Notification?.permission === 'granted';
+  notificarBtn.textContent = ativo ? '🔔 Avisos ativados' : '🔔 Avisar 30 min antes';
+  notificarBtn.classList.toggle('ativo', ativo);
+}
+
+function iniciarChecagemLembretes() {
+  if (intervaloLembretes) return;
+  verificarLembretes();
+  intervaloLembretes = setInterval(verificarLembretes, 60 * 1000);
+}
+
+notificarBtn?.addEventListener('click', async () => {
+  if (!('Notification' in window)) {
+    mostrarToast('Esse navegador não suporta notificações.', 'aviso');
+    return;
+  }
+
+  if (notificacoesAtivas()) {
+    localStorage.setItem(NOTIFICACOES_ATIVAS_CHAVE, 'false');
+    atualizarBotaoNotificar();
+    mostrarToast('Avisos desativados.', 'info');
+    return;
+  }
+
+  const permissao = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+  if (permissao !== 'granted') {
+    mostrarToast('Permissão de notificação negada pelo navegador.', 'aviso');
+    return;
+  }
+
+  localStorage.setItem(NOTIFICACOES_ATIVAS_CHAVE, 'true');
+  atualizarBotaoNotificar();
+  iniciarChecagemLembretes();
+  mostrarToast('Avisos ativados - só funciona com o app aberto.', 'info');
+});
+
+if ('Notification' in window && notificacoesAtivas() && Notification.permission === 'granted') {
+  iniciarChecagemLembretes();
+}
+atualizarBotaoNotificar();
+
 jogosSelecionarBtn?.addEventListener('click', () => {
   abrirSelecionarJogos(Number(quantidadeSelect.value), async (pernas) => {
     const entrada = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       criadoEm: new Date().toISOString(),
       pernas: pernas.map((p) => ({
+        partidaId: p.partida.partida_id,
         data: p.partida.data_realizacao_iso ?? p.partida.data_realizacao,
         mandante: { id: p.partida.time_mandante.time_id, nome: p.partida.time_mandante.nome_popular },
         visitante: { id: p.partida.time_visitante.time_id, nome: p.partida.time_visitante.nome_popular },

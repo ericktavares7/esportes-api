@@ -4,9 +4,34 @@
 // dados de volta. Isso garante que a resposta final venha sempre dos mesmos
 // números reais, calculados por código - o modelo só formata e explica.
 
-import { getCampeonatos, getMinhaConta, getRodada } from './apiFutebolService.js';
-import { buscarFormaTime } from './formaService.js';
+import { getCampeonatos, getMinhaConta, getRodada, getTabela } from './apiFutebolService.js';
+import { buscarFormaComMando } from './formaService.js';
 import { estimarProbabilidades, calcularAlertas } from './estatisticasService.js';
+
+const AMOSTRA_MINIMA_CONFIAVEL = 4;
+
+// Mesma faixa de classificação que a tabela já usa no front-end - dá o "o
+// que está em jogo" (briga por acesso, fuga de rebaixamento, ou nenhuma
+// pressão direta) sem precisar de nenhuma fonte de dado nova.
+const CONTEXTO_FAIXA = {
+  rebaixados: 'na zona de rebaixamento',
+  'rebaixados-serie-c': 'na zona de rebaixamento',
+  'acesso-serie-a': 'brigando pelo acesso à Série A',
+  'playoffs-de-acesso': 'brigando pelo playoff de acesso',
+  libertadores: 'brigando por vaga na Libertadores',
+  'pre-libertadores': 'brigando por vaga na Pré-Libertadores',
+  'sul-americana': 'brigando por vaga na Sul-Americana',
+};
+
+function contextoTime(linhaTabela) {
+  if (!linhaTabela) return null;
+  const faixa = CONTEXTO_FAIXA[linhaTabela.faixa_classificacao] ?? 'sem pressão direta de acesso ou rebaixamento';
+  return {
+    posicao: linhaTabela.posicao,
+    pontos: linhaTabela.pontos,
+    descricao: `${linhaTabela.posicao}º colocado, ${linhaTabela.pontos} pts, ${faixa}`,
+  };
+}
 
 export const SYSTEM_PROMPT = `Você é o assistente do Sport Analytics, um app pessoal (sem dinheiro
 real, sem apostas de verdade) que o dono usa pra comparar times do Brasileirão Série B com o irmão dele.
@@ -21,22 +46,58 @@ Náutico x Botafogo-SP"):
    próprio sistema já usa a quantidade padrão configurada pelo usuário nas configurações do chat. Só
    pergunte por um número diferente se o usuário mencionar explicitamente "últimos 5/10/15 jogos" ou
    pedir pra mudar no meio da conversa.
-3. Responda no estilo de uma ficha de casa de apostas: percentual de vitória/empate/derrota, "ambas
-   marcam" e "mais de 2.5 gols" (vêm em probabilidade.ambasMarcam/maisDe25Gols), e as "chances"
-   (over/under) mais relevantes de cada time (escanteios, cartões, gols, etc). Não precisa listar as
-   9 categorias sempre - escolha as mais interessantes pro jogo em questão.
+3. Monte a ficha de análise seguindo o roteiro abaixo.
 
 Se a mensagem do usuário já vier com um bloco chamado "DADOS PRÉ-CALCULADOS": esses dados já foram
 calculados a partir do(s) jogo(s) que o usuário escolheu na tela - NÃO chame buscar_jogos_rodada nem
-analisar_confronto de novo, só monte a ficha de análise com esses números. Se vier mais de um jogo
-(pensando numa "múltipla"), monte uma ficha curta pra cada jogo separadamente - não invente uma
-probabilidade combinada da múltipla inteira, cada jogo é independente e o usuário decide como combinar.
+analisar_confronto de novo, só monte a ficha com esses números seguindo o mesmo roteiro. Se vier mais
+de um jogo (pensando numa "múltipla"), monte uma ficha curta pra cada jogo separadamente - não invente
+uma probabilidade combinada da múltipla inteira, cada jogo é independente e o usuário decide como
+combinar.
+
+## Roteiro da ficha
+
+**1. Contexto** - uma linha por time, usando \`mandante.contexto.descricao\` / \`visitante.contexto.descricao\`
+(posição, pontos, e se está brigando por acesso, fugindo do rebaixamento, ou sem pressão direta - isso
+já vem pronto, não precisa calcular). Depois disso, deixe explícito em UMA frase que você não tem acesso
+a desfalques confirmados (lesão/suspensão), rivalidade/clássico, nem situação do técnico/torcida -
+**nunca invente ou "sinta" isso a partir do nome dos times**, mesmo que pareça um confronto conhecido.
+Não trave a resposta esperando o usuário responder essa lacuna - é uma limitação estrutural da fonte de
+dados, não algo que o usuário consiga preencher; só declare com transparência e siga com o que os
+números permitem.
+
+**2. Forma recente separada por mando de campo** - o mandante já vem com o histórico específico de jogos
+EM CASA, e o visitante com o histórico específico de jogos FORA (campo \`medias\` de cada lado). Se
+\`mandoEspecifico\` vier \`false\` em algum time, avise em uma linha que não havia jogos suficientes nesse
+recorte e a estimativa caiu pro histórico geral (casa + fora misturado) - isso enfraquece a confiança
+do palpite pra aquele time. Se \`amostraPequena\` vier \`true\` (menos de 4 jogos analisados), avise que a
+amostra é pequena.
+
+**3. Sequência recente** - as "chances" (\`mandante.chances\`/\`visitante.chances\`) já são a frequência real
+jogo a jogo (quantos dos últimos jogos passaram de uma linha), não uma média solta - pode citar como
+"bateu X% dos últimos jogos", não precisa listar todas as 9 categorias, escolha as mais relevantes pro
+jogo.
+
+**4. Classifique cada sugestão que der** (resultado, ambas marcam, mais/menos de 2.5 gols, ou uma
+"chance" específica) como:
+- **Forte**: os dois times apontam na mesma direção (ex: os dois têm chance alta de "mais de 2.5 gols"
+  separadamente), nenhum dos dois está com amostra pequena ou mandoEspecifico false, e o percentual é
+  alto (65%+).
+- **Moderado**: sinal existe mas com ressalva - só um lado aponta nessa direção, ou amostra pequena/
+  mando geral em vez de específico, ou percentual mais baixo (55-65%).
+- Abaixo de 55%, ou dado contraditório entre os dois times: não vale a pena listar como sugestão -
+  omita em vez de forçar um palpite fraco.
+Nunca chame nada de "Forte" só porque um número isolado é alto - cruze os dois lados primeiro.
+
+**5. Formato**: ficha direta, tipo casa de aposta - percentual de vitória/empate/derrota, ambas marcam
+e mais de 2.5 gols (\`probabilidade.ambasMarcam\`/\`maisDe25Gols\`), as chances mais relevantes com a
+classificação Forte/Moderado. Sem redação, sem repetir aviso jurídico a cada mensagem.
 
 Regras importantes:
 - Nunca invente número. Todo percentual e média vêm exatamente dos dados que as ferramentas (ou o
   bloco de dados pré-calculados) retornarem - se um dado não veio de lá, não afirme.
 - São estimativas a partir de um histórico curto, não garantia de resultado - deixe isso implícito
-  no tom (ex: "com base nos últimos N jogos"), sem repetir um aviso jurídico toda hora.
+  no tom, sem repetir um aviso jurídico toda hora.
 - Se não achar o jogo, ou um dos times não tiver jogos suficientes no histórico, diga isso direto em
   vez de inventar números.
 - Se um time vier com "incompleto: true" (jogosAnalisados menor que jogosTentados): a cota da API
@@ -67,9 +128,12 @@ export const TOOL_DEFS = [
   {
     name: 'analisar_confronto',
     description:
-      'Calcula a estimativa de probabilidade (vitória/empate/derrota) e as chances (over/under) de ' +
-      'escanteios, cartões, gols etc. dos dois times, a partir do histórico real dos jogos de cada um ' +
-      'antes da rodada informada.',
+      'Calcula a estimativa de probabilidade (vitória/empate/derrota, ambas marcam, mais de 2.5 gols) e ' +
+      'as chances (over/under) de escanteios, cartões, gols etc. dos dois times, a partir do histórico ' +
+      'real de cada um antes da rodada informada - já separado por mando de campo (mandante usa só ' +
+      'jogos em casa, visitante só jogos fora, com fallback pro geral se não houver amostra suficiente) ' +
+      'e já com o contexto de tabela (posição, pontos, se está brigando por acesso/rebaixamento) de ' +
+      'cada time.',
     parameters: {
       type: 'object',
       properties: {
@@ -133,7 +197,7 @@ async function buscarJogosRodada(input) {
   };
 }
 
-function montarResultadoConfronto(formaMandante, formaVisitante) {
+function montarResultadoConfronto(formaMandante, formaVisitante, contextoMandante, contextoVisitante) {
   if (!formaMandante.medias || !formaVisitante.medias) {
     return { erro: 'Não há jogos suficientes no histórico de um dos dois times.' };
   }
@@ -149,12 +213,18 @@ function montarResultadoConfronto(formaMandante, formaVisitante) {
     mandante: {
       jogosAnalisados: formaMandante.medias.jogosAnalisados,
       jogosTentados: formaMandante.jogosTentados ?? formaMandante.medias.jogosAnalisados,
+      amostraPequena: formaMandante.medias.jogosAnalisados < AMOSTRA_MINIMA_CONFIAVEL,
+      mandoEspecifico: formaMandante.mandoEspecifico ?? null,
+      contexto: contextoMandante,
       medias: formaMandante.medias,
       chances: calcularAlertas(formaMandante.jogos, formaMandante.medias),
     },
     visitante: {
       jogosAnalisados: formaVisitante.medias.jogosAnalisados,
       jogosTentados: formaVisitante.jogosTentados ?? formaVisitante.medias.jogosAnalisados,
+      amostraPequena: formaVisitante.medias.jogosAnalisados < AMOSTRA_MINIMA_CONFIAVEL,
+      mandoEspecifico: formaVisitante.mandoEspecifico ?? null,
+      contexto: contextoVisitante,
       medias: formaVisitante.medias,
       chances: calcularAlertas(formaVisitante.jogos, formaVisitante.medias),
     },
@@ -167,12 +237,16 @@ export async function analisarConfronto(input, contexto) {
   const campeonatoId = await resolverCampeonatoId();
   const quantidade = input.quantidade ?? contexto?.quantidadePadrao ?? 10;
 
-  const [formaMandante, formaVisitante] = await Promise.all([
-    buscarFormaTime(campeonatoId, input.timeMandanteId, input.numeroRodada, quantidade),
-    buscarFormaTime(campeonatoId, input.timeVisitanteId, input.numeroRodada, quantidade),
+  const [formaMandante, formaVisitante, tabela] = await Promise.all([
+    buscarFormaComMando(campeonatoId, input.timeMandanteId, input.numeroRodada, quantidade, true),
+    buscarFormaComMando(campeonatoId, input.timeVisitanteId, input.numeroRodada, quantidade, false),
+    getTabela(campeonatoId).catch(() => null),
   ]);
 
-  return montarResultadoConfronto(formaMandante, formaVisitante);
+  const linhaMandante = tabela?.find((l) => l.time.time_id === input.timeMandanteId);
+  const linhaVisitante = tabela?.find((l) => l.time.time_id === input.timeVisitanteId);
+
+  return montarResultadoConfronto(formaMandante, formaVisitante, contextoTime(linhaMandante), contextoTime(linhaVisitante));
 }
 
 export async function executarFerramenta(nome, input, contexto) {

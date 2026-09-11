@@ -35,6 +35,7 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
 | GET | `/api/campeonatos/:id/rodadas/:numero` | Jogos de uma rodada específica |
 | GET | `/api/matches/live` | Jogos acontecendo agora |
 | GET | `/api/matches/:id/summary` | Resumo completo de um jogo: placar, gols, cartões, substituições, escalações e estatísticas |
+| GET | `/api/matches/:id/resultado` | Só status + placar de uma partida - usado pelo Acertômetro pra conferir se a Sugestão salva bateu com o resultado real |
 | GET | `/api/times/:timeId/forma?campeonato=X&antes=Y&quantidade=5` | Últimos N jogos encerrados do time antes da rodada Y: resultados e médias (gols, escanteios, finalizações, chutes no gol, faltas, posse de bola) |
 | POST | `/api/chat` | `{ mensagem, historico?, provedor?, apiKey?, modelo?, quantidadePadrao? }` → assistente (Claude/ChatGPT/Gemini) que responde perguntas sobre confrontos usando dados reais das outras rotas (ver seção Chat abaixo) |
 | POST | `/api/chat/analise-automatica` | `{ timeMandanteId, timeVisitanteId, numeroRodada, quantidade? }` → calcula o mesmo resultado de `analisar_confronto` (probabilidade + Chances) sem passar pela IA - usado pelo seletor de jogo 🗂️ (ver "Selecionar jogo pra analisar" abaixo) |
@@ -71,7 +72,17 @@ Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a l
 - Tag de posição/pontos/zona na tabela + até 2 rótulos curtos de estilo de jogo (ex: "Contra-ataque", "Ataque volumoso"), derivados das médias com limiares fixos documentados em `sinaisPerfil()` no [script.js](public/script.js)
 - Últimos resultados (bolinha verde = vitória, cinza = empate, vermelha = derrota)
 - **Abas por time** (`secaoDetalheTimes`): escolhe um dos dois times e mostra o perfil individual dele — médias do período, Top 5 atuações e as "Chances" (ver abaixo) — sem sair do modal. Clique no outro time pra trocar.
-- **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). A mesma grade de Poisson também gera **"Ambas marcam"** e **"Mais de 2.5 gols"** (soma as combinações de placar onde os dois marcam, ou onde o total passa de 2.5) - mercados comuns em casas de aposta, mostrados junto da barra de probabilidade (`criarBarraProbabilidade` no [script.js](public/script.js)).
+- **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). A mesma grade de Poisson também gera **"Ambas marcam"** e **"Mais de 2.5 gols"** (soma as combinações de placar onde os dois marcam, ou onde o total passa de 2.5).
+- **Palpites fortes**: em vez de sempre mostrar os mesmos mercados fixos (tipo "ambas marcam: 35%",
+  um número baixo e pouco útil), `palpitesFortes()` no [script.js](public/script.js) junta os seis
+  candidatos possíveis - vitória de cada time, empate, ambas marcam / não ambas marcam, mais / menos
+  de 2.5 gols - e mostra só os que passam de 60% de confiança, do maior pro menor. Um jogo equilibrado
+  (nenhum mercado forte de nenhum lado) mostra uma nota em vez de forçar um palpite fraco.
+
+Esse comparativo (clique direto num jogo) usa o histórico **geral** de cada time (`/api/times/:id/forma`,
+casa e fora misturados) - é a visão rápida de "olhei e já vi". A análise **separada por mando de campo
+e com contexto de tabela** (ver "Contexto e mando de campo" mais abaixo) é a versão mais rigorosa, feita
+pelo seletor 🗂️ ou pelo Chat.
 
 ### Chances (over/under por estatística)
 
@@ -164,9 +175,30 @@ Fluxo: escolhe o **dia** (pílulas "Amanhã / Em 2 dias / Em 3 dias..."; o app j
 jogos daquele dia** como uma lista com checkbox (times, escudo, horário) → marca um ou mais jogos - a
 seleção continua marcada ao trocar de dia, então dá pra montar uma "múltipla" com jogos de dias
 diferentes → "Analisar seleção" calcula cada jogo separadamente (`Promise.allSettled` - um jogo sem
-histórico suficiente não derruba os outros, só fica de fora com um aviso), usando a quantidade padrão
-configurada (engrenagem do chat, ou o seletor "Últimos N jogos" do topo quando a seleção parte da aba
-Jogos).
+histórico suficiente não derruba os outros), usando a quantidade padrão configurada (engrenagem do
+chat, ou o seletor "Últimos N jogos" do topo quando a seleção parte da aba Jogos). **Só entram jogos
+com o histórico 100% completo** - se a cota da API acabar no meio da busca de algum jogo (incompleto -
+ver seção de resiliência acima), esse jogo fica de fora da seleção em vez de aparecer com dado parcial;
+o toast avisa quantos ficaram de fora e por quê.
+
+### Contexto e mando de campo
+
+`analisar_confronto`/`analise-automatica` (usado pelo 🗂️ e pelo Chat, não pelo comparativo pré-jogo por
+clique direto) busca o histórico de cada time já separado por mando de campo - o mandante usa só os
+jogos que fez **em casa**, o visitante só os que fez **fora**, já que o desempenho costuma ser bem
+diferente dependendo de onde joga. Se não houver jogos suficientes nesse recorte específico (início de
+temporada, time recém-promovido), cai pro histórico geral (casa + fora misturado) e avisa isso no card/
+resposta (`mandoEspecifico: false`). Times com menos de 4 jogos analisados também ganham um aviso de
+amostra pequena (`amostraPequena: true`).
+
+Cada time também vem com o **contexto de tabela** (posição, pontos, e se está brigando por acesso à
+Série A, playoff de acesso, ou fugindo do rebaixamento) - dado que já existe na classificação, sem
+gastar requisição extra (`contextoTime()` em [chatTools.js](src/services/chatTools.js)).
+
+**O que a API não tem, e por isso o app nunca inventa:** desfalques confirmados (lesão/suspensão),
+clássico/rivalidade regional, e situação do técnico/pressão de torcida. Esses três fariam parte de uma
+análise completa, mas a API Futebol não expõe esse tipo de dado - o prompt do chat é explícito em
+declarar essa limitação numa linha em vez de arriscar um palpite baseado em achismo.
 
 **Importante:** cada jogo é analisado de forma independente - o app nunca calcula nem mostra uma
 "probabilidade combinada" da múltipla inteira (isso exigiria assumir que os jogos são estatisticamente
@@ -189,8 +221,8 @@ nem de chave de nenhum provedor - é só o cálculo determinístico (Poisson + C
 no `localStorage` do navegador (até 30 mais recentes). Selecionar vários jogos de uma vez guarda todos
 juntos num único card "Múltipla de N jogos". Cada jogo dentro do card mostra:
 
-- A barra de probabilidade (mesmo componente visual do comparativo pré-jogo) + "Ambas marcam" e "Mais
-  de 2.5 gols"
+- A barra de probabilidade (mesmo componente visual do comparativo pré-jogo) + os "Palpites fortes"
+  daquele jogo específico (só os mercados com 60%+ de confiança - ver seção acima)
 - Uma "Sugestão" com o lado de maior probabilidade (vitória de um dos times, ou empate) e o percentual
 - As 9 "Chances" (over/under) de cada time, sem cortar pras mais altas - pra dar visão completa de
   todos os mercados na hora de montar uma múltipla (ex: escanteios de um time específico)
@@ -201,6 +233,35 @@ juntos num único card "Múltipla de N jogos". Cada jogo dentro do card mostra:
 
 `localStorage` só guarda o texto de quem pesquisou naquele navegador especificamente - não sincroniza
 entre aparelhos nem precisa de conta.
+
+### Acertômetro
+
+Botão "✅ Conferir resultados" no topo da aba: pra cada jogo salvo que ainda não foi conferido, busca o
+resultado real (`GET /api/matches/:id/resultado`, um wrapper enxuto de `getPartida`) e compara com a
+Sugestão que ficou salva. Se o jogo ainda não terminou, fica pra conferir depois - não trava nem gasta
+cota à toa (o detalhe da partida cacheia por 1 ano assim que o jogo termina, então conferir de novo é
+grátis). Um resumo tipo "Acertômetro: 7 de 10 sugestões bateram (70%)" aparece no topo da aba assim que
+existe pelo menos um jogo conferido, e cada card mostra "✅ Acertou" ou "❌ Errou" com o placar real ao
+lado da Sugestão. Jogos salvos antes dessa função existir não têm o ID da partida guardado, então ficam
+de fora da conferência (não têm como saber qual jogo real conferir).
+
+### Compartilhar como imagem
+
+O ícone 📤 no cabeçalho de cada card gera uma imagem PNG do card (via [html2canvas](https://html2canvas.hertzen.com/),
+carregado por CDN) e abre o menu de compartilhamento nativo do celular (`navigator.share`) - inclui
+WhatsApp direto se o app estiver instalado como PWA num Android/iPhone. No desktop, ou se o navegador
+não suportar compartilhamento de arquivo, baixa a imagem em vez de abrir o menu.
+
+### Aviso "faltam 30 min"
+
+Botão "🔔 Avisar 30 min antes": pede permissão de notificação do navegador e, enquanto o app estiver
+aberto (aba ou PWA rodando), checa a cada minuto se algum jogo salvo em Jogos Pesquisados está a 30
+minutos ou menos de começar, disparando uma notificação local nesse caso. **Importante:** isso não
+é notificação push de verdade - com o app fechado, não chega aviso nenhum. Notificação push de
+verdade exigiria um *service worker* + servidor de push (VAPID) + algo mantendo o Render acordado no
+horário certo (o plano free dorme sozinho) - complexidade e infraestrutura que não valem a pena pro
+tamanho desse app hoje. O aviso atual é o equivalente prático: funciona bem se você deixa a aba aberta
+ou o PWA rodando em segundo plano no celular.
 
 ## Cache local (SQLite)
 

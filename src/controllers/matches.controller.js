@@ -9,6 +9,24 @@ export async function listLive(req, res, next) {
   }
 }
 
+// Versão enxuta do getSummary, só com o que o "acertômetro" (Jogos
+// Pesquisados) precisa pra conferir se a sugestão bateu com o resultado
+// real - status e placar, nada de estatísticas/escalação.
+export async function resultado(req, res, next) {
+  try {
+    const { id } = req.params;
+    const partida = await getPartida(id);
+
+    res.json({
+      status: partida.status,
+      placarMandante: partida.placar_mandante,
+      placarVisitante: partida.placar_visitante,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getSummary(req, res, next) {
   try {
     const { id } = req.params;
