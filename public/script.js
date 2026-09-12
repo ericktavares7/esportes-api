@@ -4,6 +4,8 @@ const aoVivoLista = document.getElementById('ao-vivo-lista');
 const artilhariaLista = document.getElementById('artilharia-lista');
 const modalOverlay = document.getElementById('modal-overlay');
 const modalContent = document.getElementById('modal-content');
+const modalBaixarPdfBtn = document.getElementById('modal-baixar-pdf');
+const modalVoltarBtn = document.getElementById('modal-voltar');
 const jogosLista = document.getElementById('jogos-lista');
 const rodadaTitulo = document.getElementById('rodada-titulo');
 const btnRodadaAnterior = document.getElementById('rodada-anterior');
@@ -12,6 +14,7 @@ const quantidadeSelect = document.getElementById('quantidade-select');
 const limiarSelect = document.getElementById('limiar-select');
 const btnCalcularProvaveis = document.getElementById('btn-calcular-provaveis');
 const provaveisLista = document.getElementById('provaveis-lista');
+const provaveisDias = document.getElementById('provaveis-dias');
 const datasPills = document.getElementById('datas-pills');
 const chatMensagens = document.getElementById('chat-mensagens');
 const chatForm = document.getElementById('chat-form');
@@ -25,22 +28,6 @@ const notificarBtn = document.getElementById('notificar-btn');
 const acertometroEl = document.getElementById('acertometro');
 
 let rodadaExibida = null;
-
-// Anima a entrada de cards/linhas conforme eles aparecem na tela ao rolar.
-const revelarObserver = new IntersectionObserver((entradas) => {
-  entradas.forEach((entrada) => {
-    if (entrada.isIntersecting) {
-      entrada.target.classList.add('visivel');
-      revelarObserver.unobserve(entrada.target);
-    }
-  });
-}, { threshold: 0.1 });
-
-function comRevelacao(elemento) {
-  elemento.classList.add('reveal');
-  revelarObserver.observe(elemento);
-  return elemento;
-}
 
 async function fetchJSON(url, options) {
   const resposta = await fetch(url, options);
@@ -56,7 +43,7 @@ async function fetchJSON(url, options) {
     const detalhe = corpo?.detail ?? corpo?.error ?? `HTTP ${resposta.status}`;
     const mensagem = typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe);
     if (mensagem.includes('limite diário')) {
-      mostrarToast('Cota diária da API esgotada — tenta de novo mais tarde.', 'aviso');
+      mostrarToast('Cota diária da API esgotada. Tenta de novo mais tarde.', 'aviso');
     }
     throw new Error(mensagem);
   }
@@ -155,6 +142,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     if (btn.dataset.tab === 'tabela') carregarTabela();
     if (btn.dataset.tab === 'ao-vivo') carregarAoVivo();
     if (btn.dataset.tab === 'artilharia') carregarArtilharia();
+    if (btn.dataset.tab === 'provaveis') carregarDiasProvaveis();
   });
 });
 
@@ -163,9 +151,24 @@ campeonatoSelect.addEventListener('change', () => {
   carregarJogos();
   carregarTabela();
   carregarArtilharia();
+  if (document.getElementById('provaveis').classList.contains('active')) carregarDiasProvaveis();
 });
 
 // --- Jogos por rodada / data ---
+
+// Uma partida "conta" como atual/futura se ainda vai rolar hoje ou depois -
+// usado pra decidir se a rodada atual do campeonato já terminou.
+function temJogoAtualOuFuturo(partidas) {
+  if (!partidas || partidas.length === 0) return false;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  return partidas.some((partida) => {
+    const iso = partida.data_realizacao_iso ?? partida.data_realizacao;
+    const data = new Date(iso);
+    data.setHours(0, 0, 0, 0);
+    return data >= hoje;
+  });
+}
 
 async function carregarJogos(numeroRodada) {
   jogosLista.replaceChildren();
@@ -174,9 +177,10 @@ async function carregarJogos(numeroRodada) {
   btnRodadaProxima.disabled = true;
 
   const campeonatoId = campeonatoSelect.value;
+  const usarRodadaAtual = numeroRodada == null;
 
   try {
-    if (numeroRodada == null) {
+    if (usarRodadaAtual) {
       const campeonatos = await fetchJSON('/api/campeonatos');
       const atual = campeonatos.find((c) => String(c.campeonato_id) === campeonatoId);
       numeroRodada = atual?.rodada_atual?.rodada;
@@ -188,7 +192,19 @@ async function carregarJogos(numeroRodada) {
       return;
     }
 
-    const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
+    let rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
+
+    // Ao abrir o app, se a rodada "atual" do campeonato já terminou (todos os
+    // jogos no passado), pula pra próxima - senão a tela abre em jogos que já
+    // aconteceram em vez dos mais próximos de hoje.
+    if (usarRodadaAtual) {
+      let tentativas = 0;
+      while (rodada.proxima_rodada && !temJogoAtualOuFuturo(rodada.partidas) && tentativas < 3) {
+        rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${rodada.proxima_rodada.rodada}`);
+        tentativas += 1;
+      }
+    }
+
     rodadaExibida = rodada.rodada;
 
     rodadaTitulo.textContent = rodada.nome;
@@ -275,11 +291,16 @@ function renderJogosPorData(partidas) {
   });
 
   const chaves = [...grupos.keys()];
-  const hojeStr = new Date().toDateString();
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  // Prioriza o primeiro dia de hoje em diante (mais próximo do atual); se a
+  // rodada inteira já ficou no passado, cai pro último dia (o mais recente).
   let chaveInicial = chaves.find((chave) => {
     const iso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
-    return new Date(iso).toDateString() === hojeStr;
-  }) ?? chaves[0];
+    const data = new Date(iso);
+    data.setHours(0, 0, 0, 0);
+    return data >= hoje;
+  }) ?? chaves[chaves.length - 1];
 
   function mostrarGrupo(chave) {
     const jogosDoDia = grupos.get(chave);
@@ -326,7 +347,6 @@ function renderJogosPorData(partidas) {
 function criarLinhaJogo(partida) {
   const linha = document.createElement('div');
   linha.className = 'jogo-linha';
-  comRevelacao(linha);
   linha.addEventListener('click', () => {
     if (partida.status === 'agendado') {
       abrirFormaPreJogo(partida);
@@ -366,31 +386,84 @@ function timeLinhaJogos(time) {
 }
 
 // --- Prováveis: ranking de jogos agendados por confiança do modelo ---
+//
+// Calcular todos os jogos de uma rodada de uma vez gasta a cota rápido (2
+// requisições de forma por jogo). Por isso o fluxo é em duas etapas: primeiro
+// só lista os dias com jogo agendado (barato, cacheável), depois o usuário
+// escolhe um dia específico e só aí roda o cálculo - só pros jogos daquele dia.
 
-const NOMES_RESULTADO = { mandante: 'vence', empate: 'empate', visitante: 'vence' };
+let provaveisRodada = null;
+let provaveisDiaSelecionado = null;
+let provaveisResultadosCalculados = null;
 
 btnCalcularProvaveis.addEventListener('click', calcularProvaveis);
 
-async function calcularProvaveis() {
-  const campeonatoId = campeonatoSelect.value;
-  const quantidade = quantidadeSelect.value;
-  const limiar = Number(limiarSelect.value);
+// Trocar o % mínimo só reordena/filtra o que já foi calculado - não refaz as
+// requisições. Só some se ainda não tiver calculado o dia selecionado.
+limiarSelect.addEventListener('change', () => {
+  if (!provaveisResultadosCalculados) return;
+  renderProvaveisFiltrado(Number(limiarSelect.value));
+});
 
-  btnCalcularProvaveis.disabled = true;
-  btnCalcularProvaveis.textContent = 'Calculando...';
+// Filtra os resultados já calculados pelo limiar escolhido. Cada jogo pode
+// entrar com mais de um palpite (gols, escanteios, cartões - o que passar do
+// limiar), não só o melhor - "aproveitando cada detalhe" em vez de escolher
+// um vencedor único e descartar o resto. Se nenhum jogo bater o limiar,
+// mostra o melhor palpite dos 3 jogos mais próximos disso mesmo assim -
+// "nenhum jogo forte" não deveria significar "nenhuma informação".
+function renderProvaveisFiltrado(limiar) {
+  const validos = provaveisResultadosCalculados.resultados.filter(Boolean);
+
+  const jogosFiltrados = validos
+    .map((r) => ({
+      partida: r.partida,
+      palpites: r.candidatos.filter((c) => c.pct >= limiar).sort((a, b) => b.pct - a.pct),
+    }))
+    .filter((j) => j.palpites.length > 0)
+    .sort((a, b) => b.palpites[0].pct - a.palpites[0].pct)
+    .slice(0, 8);
+
+  if (jogosFiltrados.length > 0) {
+    renderProvaveis(jogosFiltrados, provaveisResultadosCalculados.falhas);
+    return;
+  }
+
+  const melhoresPorJogo = validos
+    .map((r) => ({ partida: r.partida, palpites: [...r.candidatos].sort((a, b) => b.pct - a.pct).slice(0, 1) }))
+    .sort((a, b) => b.palpites[0].pct - a.palpites[0].pct)
+    .slice(0, 3);
+
+  renderProvaveis(melhoresPorJogo, provaveisResultadosCalculados.falhas, { abaixoDoLimiar: true, limiar });
+}
+
+async function carregarDiasProvaveis() {
+  provaveisDias.replaceChildren();
   provaveisLista.replaceChildren();
+  provaveisRodada = null;
+  provaveisDiaSelecionado = null;
+  btnCalcularProvaveis.disabled = true;
+  btnCalcularProvaveis.textContent = 'Calcular jogos prováveis';
+
+  const campeonatoId = campeonatoSelect.value;
 
   try {
     const campeonatos = await fetchJSON('/api/campeonatos');
     const infoCampeonato = campeonatos.find((c) => String(c.campeonato_id) === campeonatoId);
-    const numeroRodada = infoCampeonato?.rodada_atual?.rodada;
+    const numeroRodadaAtual = infoCampeonato?.rodada_atual?.rodada;
 
-    if (numeroRodada == null) {
+    if (numeroRodadaAtual == null) {
       provaveisLista.appendChild(linhaVazia('Este campeonato não tem rodadas sequenciais pra calcular.'));
       return;
     }
 
-    const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
+    let rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodadaAtual}`);
+    let tentativas = 0;
+    while (rodada.proxima_rodada && !temJogoAtualOuFuturo(rodada.partidas) && tentativas < 3) {
+      rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${rodada.proxima_rodada.rodada}`);
+      tentativas += 1;
+    }
+
+    provaveisRodada = rodada;
     const agendados = (rodada.partidas ?? []).filter((p) => p.status === 'agendado');
 
     if (agendados.length === 0) {
@@ -398,6 +471,74 @@ async function calcularProvaveis() {
       return;
     }
 
+    const grupos = new Map();
+    agendados.forEach((partida) => {
+      const chave = partida.data_realizacao;
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(partida);
+    });
+
+    const chaves = [...grupos.keys()];
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const chaveInicial = chaves.find((chave) => {
+      const iso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
+      const data = new Date(iso);
+      data.setHours(0, 0, 0, 0);
+      return data >= hoje;
+    }) ?? chaves[chaves.length - 1];
+
+    chaves.forEach((chave) => {
+      const jogosDoDia = grupos.get(chave);
+      const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
+
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'data-pill';
+      pill.dataset.chave = chave;
+      const rotulo = document.createElement('div');
+      rotulo.className = 'pill-rotulo';
+      rotulo.textContent = formatarRotuloPill(dataIso);
+      const subrotulo = document.createElement('div');
+      subrotulo.className = 'pill-data';
+      subrotulo.textContent = `${formatarDataCurta(dataIso)} · ${jogosDoDia.length} jogo${jogosDoDia.length > 1 ? 's' : ''}`;
+      pill.append(rotulo, subrotulo);
+      pill.addEventListener('click', () => selecionarDiaProvaveis(chave, jogosDoDia, dataIso));
+      provaveisDias.appendChild(pill);
+    });
+
+    selecionarDiaProvaveis(chaveInicial, grupos.get(chaveInicial), grupos.get(chaveInicial)[0].data_realizacao_iso ?? chaveInicial);
+  } catch (err) {
+    provaveisLista.appendChild(linhaVazia(`Não foi possível carregar os dias: ${err.message}`));
+  }
+}
+
+function selecionarDiaProvaveis(chave, jogosDoDia, dataIso) {
+  provaveisDiaSelecionado = { chave, jogos: jogosDoDia };
+  provaveisResultadosCalculados = null;
+  provaveisDias.querySelectorAll('.data-pill').forEach((p) => {
+    p.classList.toggle('active', p.dataset.chave === chave);
+  });
+  provaveisLista.replaceChildren();
+  btnCalcularProvaveis.disabled = false;
+  btnCalcularProvaveis.textContent = `Calcular prováveis de ${formatarData(dataIso)}`;
+}
+
+async function calcularProvaveis() {
+  if (!provaveisDiaSelecionado || !provaveisRodada) return;
+
+  const campeonatoId = campeonatoSelect.value;
+  const quantidade = quantidadeSelect.value;
+  const limiar = Number(limiarSelect.value);
+  const numeroRodada = provaveisRodada.rodada;
+  const agendados = provaveisDiaSelecionado.jogos;
+  const textoBotao = btnCalcularProvaveis.textContent;
+
+  btnCalcularProvaveis.disabled = true;
+  btnCalcularProvaveis.textContent = 'Calculando...';
+  provaveisLista.replaceChildren();
+
+  try {
     // Promise.allSettled (não Promise.all): um jogo sem cache disponível não
     // pode derrubar o cálculo dos outros que já tinham dado certo.
     let falhas = 0;
@@ -409,15 +550,43 @@ async function calcularProvaveis() {
         ]);
         if (!formaMandante.medias || !formaVisitante.medias) return null;
 
+        const nomeMandante = partida.time_mandante.nome_popular;
+        const nomeVisitante = partida.time_visitante.nome_popular;
         const est = estimarProbabilidades(formaMandante.medias, formaVisitante.medias);
-        const opcoes = [
-          { lado: 'mandante', pct: est.vitoriaMandante, nome: partida.time_mandante.nome_popular },
-          { lado: 'empate', pct: est.empate, nome: 'Empate' },
-          { lado: 'visitante', pct: est.vitoriaVisitante, nome: partida.time_visitante.nome_popular },
-        ];
-        const favorito = opcoes.reduce((a, b) => (b.pct > a.pct ? b : a));
 
-        return { partida, favorito };
+        // Não usa vitória/empate/derrota (nem dupla chance, que é só a soma de
+        // dois desses três) como candidato aqui - esse número já é o primeiro
+        // que aparece ao abrir o confronto (barra "Estimativa estatística").
+        // Prováveis serve pra mostrar mercados específicos que não estão em
+        // destaque lá: gols, escanteios, cartões - ideias de aposta de verdade,
+        // não o mesmo placar provável reembalado.
+        const candidatos = [
+          { label: 'Ambas marcam', pct: est.ambasMarcam },
+          { label: 'Não ambas marcam', pct: 100 - est.ambasMarcam },
+          { label: 'Mais de 2.5 gols', pct: est.maisDe25Gols },
+          { label: 'Menos de 2.5 gols', pct: 100 - est.maisDe25Gols },
+        ];
+
+        // Escanteios e cartões vêm da frequência histórica do próprio time
+        // (mesma conta da seção "Chances" do comparativo), não do modelo de
+        // Poisson - por isso são calculados à parte, um candidato pra cada
+        // lado do jogo.
+        if (formaMandante.jogos?.length) {
+          const alertasMandante = calcularAlertas(formaMandante.jogos, formaMandante.medias);
+          const escMandante = alertasMandante.find((a) => a.label === 'Escanteios');
+          if (escMandante) candidatos.push({ label: `${nomeMandante}: escanteios > ${escMandante.linha}`, pct: escMandante.percentual });
+          const cartoesMandante = alertasMandante.find((a) => a.label === 'Cartões amarelos');
+          if (cartoesMandante) candidatos.push({ label: `${nomeMandante}: cartões amarelos > ${cartoesMandante.linha}`, pct: cartoesMandante.percentual });
+        }
+        if (formaVisitante.jogos?.length) {
+          const alertasVisitante = calcularAlertas(formaVisitante.jogos, formaVisitante.medias);
+          const escVisitante = alertasVisitante.find((a) => a.label === 'Escanteios');
+          if (escVisitante) candidatos.push({ label: `${nomeVisitante}: escanteios > ${escVisitante.linha}`, pct: escVisitante.percentual });
+          const cartoesVisitante = alertasVisitante.find((a) => a.label === 'Cartões amarelos');
+          if (cartoesVisitante) candidatos.push({ label: `${nomeVisitante}: cartões amarelos > ${cartoesVisitante.linha}`, pct: cartoesVisitante.percentual });
+        }
+
+        return { partida, candidatos };
       }),
     );
 
@@ -429,21 +598,17 @@ async function calcularProvaveis() {
       return s.value;
     });
 
-    const filtrados = resultados
-      .filter((r) => r && r.favorito.pct >= limiar)
-      .sort((a, b) => b.favorito.pct - a.favorito.pct)
-      .slice(0, 10);
-
-    renderProvaveis(filtrados, falhas);
+    provaveisResultadosCalculados = { resultados, falhas };
+    renderProvaveisFiltrado(limiar);
   } catch (err) {
     provaveisLista.appendChild(linhaVazia(`Não foi possível calcular: ${err.message}`));
   } finally {
     btnCalcularProvaveis.disabled = false;
-    btnCalcularProvaveis.textContent = 'Calcular jogos prováveis desta rodada';
+    btnCalcularProvaveis.textContent = textoBotao;
   }
 }
 
-function renderProvaveis(itens, falhas = 0) {
+function renderProvaveis(jogos, falhas = 0, { abaixoDoLimiar = false, limiar = null } = {}) {
   provaveisLista.replaceChildren();
 
   if (falhas > 0) {
@@ -451,15 +616,19 @@ function renderProvaveis(itens, falhas = 0) {
     provaveisLista.appendChild(linhaVazia(aviso));
   }
 
-  if (itens.length === 0) {
-    provaveisLista.appendChild(linhaVazia('Nenhum jogo bateu o limiar escolhido nesta rodada. Tenta um percentual menor.'));
+  if (jogos.length === 0) {
+    provaveisLista.appendChild(linhaVazia('Nenhum jogo desse dia pôde ser calculado agora.'));
     return;
+  }
+
+  if (abaixoDoLimiar) {
+    provaveisLista.appendChild(linhaVazia(`Nenhum palpite bateu ${limiar}% nesse dia. Esses foram os mais fortes mesmo assim:`));
   }
 
   const lista = document.createElement('ol');
   lista.className = 'provaveis-ranking';
 
-  itens.forEach(({ partida, favorito }) => {
+  jogos.forEach(({ partida, palpites }) => {
     const li = document.createElement('li');
     li.className = 'provavel-item';
     li.addEventListener('click', () => abrirFormaPreJogo(partida));
@@ -467,11 +636,18 @@ function renderProvaveis(itens, falhas = 0) {
     const cabecalho = document.createElement('div');
     cabecalho.className = 'provavel-cabecalho';
     cabecalho.appendChild(el2('span', 'provavel-confronto', `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular}`));
-    cabecalho.appendChild(el2('span', 'provavel-percentual', `${favorito.pct}%`));
+    cabecalho.appendChild(el2('span', 'provavel-detalhe', partida.hora_realizacao ?? ''));
     li.appendChild(cabecalho);
 
-    const texto = favorito.lado === 'empate' ? 'Empate' : `${favorito.nome} ${NOMES_RESULTADO[favorito.lado]}`;
-    li.appendChild(el2('div', 'provavel-detalhe', `${texto} · ${partida.hora_realizacao ?? ''}`));
+    const chips = document.createElement('div');
+    chips.className = 'prob-mercados-extra provavel-palpites';
+    palpites.forEach(({ label, pct }) => {
+      const chip = document.createElement('span');
+      chip.className = 'mercado-chip mercado-chip-forte';
+      chip.textContent = `${label}: ${pct}%`;
+      chips.appendChild(chip);
+    });
+    li.appendChild(chips);
 
     lista.appendChild(li);
   });
@@ -533,7 +709,7 @@ async function carregarTabela() {
     tr.appendChild(celula(linha.derrotas));
     tr.appendChild(celula(linha.saldo_gols));
 
-    tabelaBody.appendChild(comRevelacao(tr));
+    tabelaBody.appendChild(tr);
   });
 }
 
@@ -565,7 +741,7 @@ async function carregarAoVivo() {
   }
 
   partidas.forEach((partida) => {
-    aoVivoLista.appendChild(comRevelacao(criarCardJogo(partida)));
+    aoVivoLista.appendChild(criarCardJogo(partida));
   });
 }
 
@@ -641,14 +817,14 @@ async function carregarArtilharia() {
 
     const nome = document.createElement('span');
     nome.className = 'nome';
-    nome.textContent = `${item.atleta.nome_popular} — ${item.time.nome_popular}`;
+    nome.textContent = `${item.atleta.nome_popular} (${item.time.nome_popular})`;
 
     const gols = document.createElement('span');
     gols.className = 'gols';
     gols.textContent = `${item.gols} gols`;
 
     li.append(img, nome, gols);
-    artilhariaLista.appendChild(comRevelacao(li));
+    artilhariaLista.appendChild(li);
   });
 }
 
@@ -666,6 +842,9 @@ const FAIXA_LABELS = {
 
 async function abrirFormaPreJogo(partida) {
   modalContent.replaceChildren();
+  modalBaixarPdfBtn.hidden = true;
+  modalVoltarBtn.hidden = true;
+  modalVoltarCallback = null;
   modalOverlay.classList.add('active');
 
   const campeonatoId = campeonatoSelect.value;
@@ -682,9 +861,24 @@ async function abrirFormaPreJogo(partida) {
   subtitulo.textContent = `Últimos ${quantidade} jogos`;
   cabecalho.append(times, subtitulo);
   modalContent.appendChild(cabecalho);
+  habilitarBaixarPdf(times.textContent);
 
   let formaMandante;
   let formaVisitante;
+  let linhaMandante;
+  let linhaVisitante;
+  // Os dados só terminam de carregar mais abaixo - o botão lê as variáveis
+  // no momento do clique, então pode ser criado aqui em cima mesmo assim.
+  modalContent.appendChild(
+    botaoCopiar((botao) =>
+      copiarTexto(botao, () =>
+        formaMandante?.medias && formaVisitante?.medias
+          ? montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linhaMandante, linhaVisitante)
+          : null,
+      ),
+    ),
+  );
+
   let tabela;
   try {
     [formaMandante, formaVisitante, tabela] = await Promise.all([
@@ -697,8 +891,8 @@ async function abrirFormaPreJogo(partida) {
     return;
   }
 
-  const linhaMandante = tabela.find((l) => l.time.time_id === partida.time_mandante.time_id);
-  const linhaVisitante = tabela.find((l) => l.time.time_id === partida.time_visitante.time_id);
+  linhaMandante = tabela.find((l) => l.time.time_id === partida.time_mandante.time_id);
+  linhaVisitante = tabela.find((l) => l.time.time_id === partida.time_visitante.time_id);
 
   const tagsRow = document.createElement('div');
   tagsRow.className = 'forma-tags-linha';
@@ -728,8 +922,47 @@ async function abrirFormaPreJogo(partida) {
   );
 }
 
+// Texto simples do comparativo pré-jogo (contexto, forma recente, médias e
+// estimativa) pra colar em qualquer lugar - reaproveita os mesmos cálculos
+// já usados nas seções visuais.
+function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linhaMandante, linhaVisitante) {
+  const nomeMandante = partida.time_mandante.nome_popular;
+  const nomeVisitante = partida.time_visitante.nome_popular;
+  const linhas = [`${nomeMandante} x ${nomeVisitante}`, ''];
+
+  if (linhaMandante) linhas.push(`${nomeMandante}: ${linhaMandante.posicao}º, ${linhaMandante.pontos} pts`);
+  if (linhaVisitante) linhas.push(`${nomeVisitante}: ${linhaVisitante.posicao}º, ${linhaVisitante.pontos} pts`);
+  linhas.push('');
+
+  linhas.push(`Forma recente ${nomeMandante} (mais recente primeiro): ${formaMandante.jogos.map((j) => j.resultado).join(', ')}`);
+  linhas.push(`Forma recente ${nomeVisitante} (mais recente primeiro): ${formaVisitante.jogos.map((j) => j.resultado).join(', ')}`);
+  linhas.push('');
+
+  linhas.push(`Médias (${nomeMandante} / ${nomeVisitante})`);
+  LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
+    linhas.push(`${label}: ${formaMandante.medias[campo]}${sufixo} / ${formaVisitante.medias[campo]}${sufixo}`);
+  });
+  linhas.push('');
+
+  const estimativa = estimarProbabilidades(formaMandante.medias, formaVisitante.medias);
+  linhas.push('Estimativa estatística (modelo de Poisson)');
+  linhas.push(`${nomeMandante} ${estimativa.vitoriaMandante}% - Empate ${estimativa.empate}% - ${nomeVisitante} ${estimativa.vitoriaVisitante}%`);
+  linhas.push(`Gols esperados: ${nomeMandante} ${estimativa.xgMandante} x ${estimativa.xgVisitante} ${nomeVisitante}`);
+
+  const fortes = palpitesFortes(estimativa, nomeMandante, nomeVisitante);
+  if (fortes.length > 0) {
+    linhas.push('');
+    linhas.push('Palpites fortes:');
+    fortes.forEach(({ label, valor }) => linhas.push(`- ${label}: ${valor}%`));
+  }
+
+  return linhas.join('\n').trim();
+}
+
 // Abas pra escolher um dos dois times e ver o perfil individual dele
-// (médias, top 5, chances) sem sair do comparativo do jogo.
+// (médias, top 5) sem sair do comparativo do jogo. As "Chances" ficam de
+// fora da troca de aba - mostram os dois times ao mesmo tempo, porque são
+// estatísticas da partida como um todo, não só de um lado do confronto.
 function secaoDetalheTimes(times) {
   const secao = document.createElement('div');
   secao.className = 'resumo-secao';
@@ -744,7 +977,6 @@ function secaoDetalheTimes(times) {
     const { forma } = times[indice];
     corpo.appendChild(secaoMediasIndividuais(forma.medias));
     corpo.appendChild(secaoTop5(forma.jogos));
-    corpo.appendChild(secaoAlertas(forma.jogos, forma.medias));
   }
 
   times.forEach((time, indice) => {
@@ -760,7 +992,21 @@ function secaoDetalheTimes(times) {
   });
 
   renderCorpo(0);
-  secao.append(tabsWrap, corpo);
+  secao.append(tabsWrap, corpo, secaoAlertasComparativo(times));
+  return secao;
+}
+
+function secaoAlertasComparativo(times) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Chances (com base nos últimos jogos de cada time)';
+  secao.appendChild(titulo);
+
+  times.forEach(({ nome, forma }) => {
+    secao.appendChild(criarBlocoChances(nome, calcularAlertas(forma.jogos, forma.medias)));
+  });
+
   return secao;
 }
 
@@ -838,7 +1084,7 @@ function linhaResultados(nomeTime, jogos) {
     const badge = document.createElement('span');
     badge.className = `resultado-badge ${jogo.resultado}`;
     badge.textContent = jogo.resultado;
-    badge.title = `${jogo.mandante ? 'vs' : '@'} ${jogo.adversario} — ${jogo.placar}`;
+    badge.title = `${jogo.mandante ? 'vs' : '@'} ${jogo.adversario}: ${jogo.placar}`;
     badges.appendChild(badge);
   });
   linha.appendChild(badges);
@@ -1035,11 +1281,16 @@ function criarSegmentoProb(tipo, valor) {
 
 async function abrirPerfilTime(linhaTabela) {
   modalContent.replaceChildren();
+  modalBaixarPdfBtn.hidden = true;
+  modalVoltarBtn.hidden = true;
+  modalVoltarCallback = null;
   modalOverlay.classList.add('active');
 
   const campeonatoId = campeonatoSelect.value;
   const quantidade = quantidadeSelect.value;
   const time = linhaTabela.time;
+  let forma;
+  let jogosFuturos = [];
 
   const cabecalho = document.createElement('div');
   cabecalho.className = 'resumo-placar';
@@ -1051,12 +1302,19 @@ async function abrirPerfilTime(linhaTabela) {
   subtitulo.textContent = `Histórico dos últimos ${quantidade} jogos`;
   cabecalho.append(nomeEl, subtitulo);
   modalContent.appendChild(cabecalho);
+  habilitarBaixarPdf(nomeEl.textContent);
+
+  // forma/jogosFuturos são lidos no momento do clique, não na criação do
+  // botão - por isso dá pra criar o botão já aqui em cima, antes deles
+  // terminarem de carregar.
+  modalContent.appendChild(
+    botaoCopiar((botao) => copiarTexto(botao, () => (forma ? montarTextoInformacoesTime(time, quantidade, forma, jogosFuturos) : null))),
+  );
 
   const tagsRow = document.createElement('div');
   tagsRow.className = 'forma-tags-linha';
   modalContent.appendChild(tagsRow);
 
-  let forma;
   let numeroRodadaAtual;
   try {
     const campeonatos = await fetchJSON('/api/campeonatos');
@@ -1085,63 +1343,197 @@ async function abrirPerfilTime(linhaTabela) {
   modalContent.appendChild(secaoAlertas(forma.jogos, forma.medias));
 
   try {
-    const proximoJogo = await buscarProximoJogo(campeonatoId, numeroRodadaAtual, time.time_id);
-    if (proximoJogo) {
-      modalContent.appendChild(await secaoProximoJogo(campeonatoId, quantidade, numeroRodadaAtual, time, proximoJogo));
-    }
+    jogosFuturos = await buscarProximosJogos(campeonatoId, numeroRodadaAtual, time.time_id);
+    modalContent.appendChild(secaoJogosTime(time.time_id, forma.jogos, jogosFuturos, linhaTabela));
   } catch (err) {
-    modalContent.appendChild(linhaVazia(`Não foi possível carregar o próximo jogo: ${err.message}`));
+    modalContent.appendChild(linhaVazia(`Não foi possível carregar os próximos jogos: ${err.message}`));
   }
 }
 
-async function buscarProximoJogo(campeonatoId, numeroRodada, timeId) {
-  if (numeroRodada == null) return null;
-  const rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numeroRodada}`);
-  return (rodada.partidas ?? []).find(
-    (p) => p.status === 'agendado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
-  );
+// Monta um texto simples (pra colar no chat, whatsapp etc) com o resumo do
+// time: médias, forma recente, próximos e últimos jogos - tudo que já
+// calculamos, sem precisar printar tela.
+function montarTextoInformacoesTime(time, quantidade, forma, jogosFuturos) {
+  const linhas = [`${time.nome_popular} - últimos ${quantidade} jogos`, ''];
+
+  if (forma.medias) {
+    LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
+      linhas.push(`${label}: ${forma.medias[campo]}${sufixo}`);
+    });
+    linhas.push('');
+  }
+
+  if (forma.jogos?.length) {
+    linhas.push(`Forma recente (mais recente primeiro): ${forma.jogos.map((j) => j.resultado).join(', ')}`);
+    linhas.push('');
+  }
+
+  if (jogosFuturos.length > 0) {
+    linhas.push('Próximos jogos:');
+    jogosFuturos.forEach((partida) => {
+      const mandante = partida.time_mandante.time_id === time.time_id;
+      const adversario = mandante ? partida.time_visitante.nome_popular : partida.time_mandante.nome_popular;
+      linhas.push(`- ${formatarDataCurta(partida.data_realizacao_iso)} ${mandante ? 'vs' : '@'} ${adversario}`);
+    });
+    linhas.push('');
+  }
+
+  if (forma.jogos?.length) {
+    linhas.push('Últimos jogos:');
+    forma.jogos.forEach((jogo) => {
+      linhas.push(`- ${formatarDataCurta(jogo.data)} ${jogo.mandante ? 'vs' : '@'} ${jogo.adversario}: ${jogo.placar}`);
+    });
+  }
+
+  return linhas.join('\n').trim();
 }
 
-async function secaoProximoJogo(campeonatoId, quantidade, antesRodada, time, partida) {
+// Botão de copiar genérico - `montarTexto` só é chamado no clique (não na
+// criação do botão), então dá pra criar o botão antes dos dados terminarem
+// de carregar e ele ainda funcionar certo depois.
+async function copiarTexto(botao, montarTexto) {
+  const texto = montarTexto();
+  if (!texto) {
+    mostrarToast('Ainda carregando os dados - espera só um instante.', 'aviso');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(texto);
+    const textoOriginal = botao.textContent;
+    botao.textContent = 'Copiado!';
+    setTimeout(() => {
+      botao.textContent = textoOriginal;
+    }, 1500);
+  } catch {
+    mostrarToast('Não foi possível copiar - copia manualmente pelo navegador.', 'aviso');
+  }
+}
+
+function botaoCopiar(aoClicar) {
+  const botao = document.createElement('button');
+  botao.type = 'button';
+  botao.className = 'pesquisados-acao-btn';
+  botao.textContent = 'Copiar informações';
+  botao.addEventListener('click', () => aoClicar(botao));
+  return botao;
+}
+
+// Lista de jogos do time, passados e futuros, tudo num lugar só (tipo o
+// painel de partidas do Sofascore quando você clica num time). Os passados
+// já vêm do "forma" que a gente buscou; os futuros escaneiam rodada por
+// rodada a partir da atual, com um teto de tentativas pra não sair fetchando
+// rodada atrás de rodada até o fim do campeonato à toa.
+//
+// O backend guarda rodada ainda não encerrada por só 5 min (pra pegar
+// remarcação de horário) - reabrir o mesmo time pouco depois disso reconta
+// aquele escaneamento inteiro de novo. Como data de próximo jogo não muda de
+// minuto em minuto, um cache à parte aqui no front, com prazo mais folgado,
+// evita gastar cota de novo só por reabrir o mesmo perfil.
+const cacheProximosJogos = new Map();
+const VALIDADE_PROXIMOS_JOGOS_MS = 20 * 60 * 1000;
+
+async function buscarProximosJogos(campeonatoId, numeroRodadaAtual, timeId, maximo = 5) {
+  const chave = `${campeonatoId}:${timeId}:${numeroRodadaAtual}`;
+  const emCache = cacheProximosJogos.get(chave);
+  if (emCache && Date.now() - emCache.quando < VALIDADE_PROXIMOS_JOGOS_MS) {
+    return emCache.jogos;
+  }
+
+  const jogos = [];
+  let numero = numeroRodadaAtual;
+  let tentativas = 0;
+  while (numero != null && jogos.length < maximo && tentativas < 10) {
+    let rodada;
+    try {
+      rodada = await fetchJSON(`/api/campeonatos/${campeonatoId}/rodadas/${numero}`);
+    } catch {
+      break;
+    }
+    const jogoDoTime = (rodada.partidas ?? []).find(
+      (p) => p.status === 'agendado' && (p.time_mandante.time_id === timeId || p.time_visitante.time_id === timeId),
+    );
+    if (jogoDoTime) jogos.push(jogoDoTime);
+    numero = rodada.proxima_rodada?.rodada ?? null;
+    tentativas += 1;
+  }
+
+  cacheProximosJogos.set(chave, { quando: Date.now(), jogos });
+  return jogos;
+}
+
+function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
   const secao = document.createElement('div');
   secao.className = 'resumo-secao';
   const titulo = document.createElement('h3');
-  titulo.textContent = 'Próximo jogo';
+  titulo.textContent = 'Jogos';
   secao.appendChild(titulo);
 
-  const linha = document.createElement('div');
-  linha.className = 'forma-resultados-linha';
-  const nomeConfronto = document.createElement('span');
-  nomeConfronto.className = 'forma-resultados-nome';
-  nomeConfronto.textContent = `${partida.time_mandante.nome_popular} x ${partida.time_visitante.nome_popular}`;
-  linha.appendChild(nomeConfronto);
-  secao.appendChild(linha);
-
-  const adversarioId =
-    partida.time_mandante.time_id === time.time_id ? partida.time_visitante.time_id : partida.time_mandante.time_id;
-
-  const formaAdversario = await fetchJSON(
-    `/api/times/${adversarioId}/forma?campeonato=${campeonatoId}&antes=${antesRodada}&quantidade=${quantidade}`,
-  );
-
-  const formaTime = await fetchJSON(
-    `/api/times/${time.time_id}/forma?campeonato=${campeonatoId}&antes=${antesRodada}&quantidade=${quantidade}`,
-  );
-
-  if (!formaTime.medias || !formaAdversario.medias) {
-    secao.appendChild(linhaVazia('Sem dados suficientes do adversário para estimar.'));
+  if (jogosFuturos.length === 0 && jogosPassados.length === 0) {
+    secao.appendChild(linhaVazia('Nenhum jogo encontrado pra esse time.'));
     return secao;
   }
 
-  const ehMandante = partida.time_mandante.time_id === time.time_id;
-  const mediasMandante = ehMandante ? formaTime.medias : formaAdversario.medias;
-  const mediasVisitante = ehMandante ? formaAdversario.medias : formaTime.medias;
+  // Volta pro mesmo perfil de time depois de ver o jogo - sem isso, quem
+  // clica num jogo aqui de dentro fica preso na tela do jogo, sem um jeito
+  // fácil de retomar de onde parou.
+  const voltarParaPerfil = () => abrirPerfilTime(linhaTabela);
 
-  secao.appendChild(
-    secaoProbabilidade(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, mediasMandante, mediasVisitante),
-  );
+  jogosFuturos.forEach((partida) => {
+    const mandante = partida.time_mandante.time_id === timeId;
+    const adversario = mandante ? partida.time_visitante.nome_popular : partida.time_mandante.nome_popular;
+    secao.appendChild(
+      criarLinhaJogoTime({
+        data: partida.data_realizacao_iso,
+        adversario,
+        mandante,
+        situacaoTexto: 'AGENDADA',
+        situacaoClasse: '',
+        aoClicar: () => abrirFormaPreJogo(partida).then(() => configurarVoltar(voltarParaPerfil)),
+      }),
+    );
+  });
+
+  jogosPassados.forEach((jogo) => {
+    secao.appendChild(
+      criarLinhaJogoTime({
+        data: jogo.data,
+        adversario: jogo.adversario,
+        mandante: jogo.mandante,
+        situacaoTexto: jogo.placar,
+        situacaoClasse: 'encerrada',
+        aoClicar: () => abrirResumo(jogo.partidaId).then(() => configurarVoltar(voltarParaPerfil)),
+      }),
+    );
+  });
 
   return secao;
+}
+
+function criarLinhaJogoTime({ data, adversario, mandante, situacaoTexto, situacaoClasse, aoClicar }) {
+  const linha = document.createElement('div');
+  linha.className = 'jogo-linha';
+  linha.addEventListener('click', aoClicar);
+
+  const dataEl = document.createElement('span');
+  dataEl.className = 'horario';
+  dataEl.textContent = formatarDataCurta(data);
+
+  const confronto = document.createElement('div');
+  confronto.className = 'confrontos';
+  const timeLinha = document.createElement('div');
+  timeLinha.className = 'time-linha';
+  const nome = document.createElement('span');
+  nome.textContent = `${mandante ? 'vs' : '@'} ${adversario}`;
+  timeLinha.appendChild(nome);
+  confronto.appendChild(timeLinha);
+
+  const situacaoEl = document.createElement('span');
+  situacaoEl.className = `situacao ${situacaoClasse}`;
+  situacaoEl.textContent = situacaoTexto;
+
+  linha.append(dataEl, confronto, situacaoEl);
+  return linha;
 }
 
 function secaoMediasIndividuais(medias) {
@@ -1284,6 +1676,9 @@ function secaoAlertas(jogos, medias) {
 
 async function abrirResumo(partidaId) {
   modalContent.replaceChildren();
+  modalBaixarPdfBtn.hidden = true;
+  modalVoltarBtn.hidden = true;
+  modalVoltarCallback = null;
   modalOverlay.classList.add('active');
 
   const resumo = await fetchJSON(`/api/matches/${partidaId}/summary`);
@@ -1298,11 +1693,47 @@ async function abrirResumo(partidaId) {
   placarGrande.textContent = resumo.confronto.placar;
   placarBloco.append(times, placarGrande);
   modalContent.appendChild(placarBloco);
+  habilitarBaixarPdf(times.textContent);
+  modalContent.appendChild(botaoCopiar((botao) => copiarTexto(botao, () => montarTextoResumoJogo(resumo))));
 
   modalContent.appendChild(secaoInformacoes(resumo));
   modalContent.appendChild(secaoGols(resumo.gols));
   modalContent.appendChild(secaoCartoes(resumo.cartoes));
-  modalContent.appendChild(secaoEstatisticas(resumo.estatisticas, resumo.confronto.mandante, resumo.confronto.visitante));
+  modalContent.appendChild(secaoEstatisticas(resumo.estatisticas, resumo.cartoes, resumo.confronto.mandante, resumo.confronto.visitante));
+}
+
+// Texto simples do resumo do jogo (placar, gols, cartões, estatísticas
+// gerais) pra colar em qualquer lugar - reaproveita a mesma lista de
+// estatísticas que já monta a seção visual, só formatada como texto.
+function montarTextoResumoJogo(resumo) {
+  const nomeMandante = resumo.confronto.mandante;
+  const nomeVisitante = resumo.confronto.visitante;
+  const linhas = [`${nomeMandante} x ${nomeVisitante} - ${resumo.confronto.placar}`, ''];
+
+  linhas.push(`Competição: ${resumo.partida.campeonato ?? '-'}`);
+  linhas.push(`Estádio: ${resumo.partida.estadio ?? '-'}`);
+  linhas.push(`Rodada: ${resumo.partida.rodada ?? '-'}`);
+  linhas.push('');
+
+  const gols = [
+    ...resumo.gols.mandante.map((g) => ({ ...g, time: nomeMandante })),
+    ...resumo.gols.visitante.map((g) => ({ ...g, time: nomeVisitante })),
+  ].sort((a, b) => a.minuto.localeCompare(b.minuto));
+  if (gols.length > 0) {
+    linhas.push('Gols:');
+    gols.forEach((g) => {
+      linhas.push(`- ${g.minuto} ${g.atleta.nome_popular} (${g.time})${g.penalti ? ' [pênalti]' : ''}${g.gol_contra ? ' [contra]' : ''}`);
+    });
+    linhas.push('');
+  }
+
+  linhas.push(`Estatísticas gerais (${nomeMandante} / ${nomeVisitante})`);
+  linhas.push(`Posse de bola: ${parsePercentual(resumo.estatisticas.mandante.posse_de_bola)}% / ${parsePercentual(resumo.estatisticas.visitante.posse_de_bola)}%`);
+  linhasEstatisticasGerais(resumo.estatisticas, resumo.cartoes).forEach(({ label, m, v, sufixo = '' }) => {
+    linhas.push(`${label}: ${m}${sufixo} / ${v}${sufixo}`);
+  });
+
+  return linhas.join('\n').trim();
 }
 
 function secaoInformacoes(resumo) {
@@ -1399,7 +1830,7 @@ function secaoCartoes(cartoes) {
     minuto.className = 'minuto';
     minuto.textContent = cartao.minuto ?? '';
     const texto = document.createElement('span');
-    texto.textContent = `${cartao.tipo} — ${cartao.atleta?.nome_popular ?? ''}`;
+    texto.textContent = `${cartao.tipo}: ${cartao.atleta?.nome_popular ?? ''}`;
     linha.append(minuto, texto);
     secao.appendChild(linha);
   });
@@ -1418,58 +1849,29 @@ function parsePercentual(valor) {
   return parseInt(valor, 10) || 0;
 }
 
-const CATEGORIAS_STATS = {
-  principais: 'Principais',
-  finalizacoes: 'Finalizações',
-  passes: 'Passes',
-  defesa: 'Defesa',
-};
-
-function linhasPorCategoria(chave, estatisticas) {
+// Visão geral da partida num único lugar (tipo o "Match overview" do
+// Sofascore) - só com o que a API Futebol realmente mede. Não temos
+// distância percorrida, sprints ou xG de rastreamento profissional (isso é
+// dado pago de provedor tipo Opta, não dá pra replicar de graça); o que dá
+// pra mostrar de verdade é posse, finalizações, escanteios, faltas, cartões,
+// impedimentos, passes, desarmes e defesas do goleiro.
+function linhasEstatisticasGerais(estatisticas, cartoes) {
   const m = estatisticas.mandante;
   const v = estatisticas.visitante;
 
-  const mapa = {
-    principais: [
-      { label: 'Finalizações', m: m.finalizacao.total, v: v.finalizacao.total },
-      { label: 'Chutes no gol', m: m.finalizacao.no_gol, v: v.finalizacao.no_gol },
-      { label: 'Escanteios', m: m.escanteios, v: v.escanteios },
-      { label: 'Faltas cometidas', m: m.faltas, v: v.faltas },
-      { label: 'Impedimentos', m: m.impedimentos, v: v.impedimentos },
-    ],
-    finalizacoes: [
-      { label: 'Finalizações totais', m: m.finalizacao.total, v: v.finalizacao.total },
-      { label: 'No gol', m: m.finalizacao.no_gol, v: v.finalizacao.no_gol },
-      { label: 'Para fora', m: m.finalizacao.pra_fora, v: v.finalizacao.pra_fora },
-      { label: 'Na trave', m: m.finalizacao.na_trave, v: v.finalizacao.na_trave },
-      { label: 'Bloqueadas', m: m.finalizacao.bloqueado, v: v.finalizacao.bloqueado },
-      {
-        label: 'Precisão de finalização',
-        m: parsePercentual(m.finalizacao.precisao),
-        v: parsePercentual(v.finalizacao.precisao),
-        sufixo: '%',
-      },
-    ],
-    passes: [
-      { label: 'Passes totais', m: m.passes.total, v: v.passes.total },
-      { label: 'Passes completos', m: m.passes.completos, v: v.passes.completos },
-      { label: 'Passes errados', m: m.passes.errados, v: v.passes.errados },
-      {
-        label: 'Precisão de passe',
-        m: parsePercentual(m.passes.precisao),
-        v: parsePercentual(v.passes.precisao),
-        sufixo: '%',
-      },
-    ],
-    defesa: [
-      { label: 'Desarmes', m: m.desarmes, v: v.desarmes },
-      { label: 'Defesas do goleiro', m: m.defensivo.defesas, v: v.defensivo.defesas },
-      { label: 'Faltas cometidas', m: m.faltas, v: v.faltas },
-      { label: 'Impedimentos', m: m.impedimentos, v: v.impedimentos },
-    ],
-  };
-
-  return mapa[chave];
+  return [
+    { label: 'Finalizações', m: m.finalizacao.total, v: v.finalizacao.total },
+    { label: 'Chutes no gol', m: m.finalizacao.no_gol, v: v.finalizacao.no_gol },
+    { label: 'Escanteios', m: m.escanteios, v: v.escanteios },
+    { label: 'Faltas cometidas', m: m.faltas, v: v.faltas },
+    { label: 'Cartões amarelos', m: cartoes.amarelo.mandante.length, v: cartoes.amarelo.visitante.length },
+    { label: 'Cartões vermelhos', m: cartoes.vermelho.mandante.length, v: cartoes.vermelho.visitante.length },
+    { label: 'Impedimentos', m: m.impedimentos, v: v.impedimentos },
+    { label: 'Passes totais', m: m.passes.total, v: v.passes.total },
+    { label: 'Precisão de passe', m: parsePercentual(m.passes.precisao), v: parsePercentual(v.passes.precisao), sufixo: '%' },
+    { label: 'Desarmes', m: m.desarmes, v: v.desarmes },
+    { label: 'Defesas do goleiro', m: m.defensivo.defesas, v: v.defensivo.defesas },
+  ];
 }
 
 function criarBarraPosse(estatisticas) {
@@ -1520,18 +1922,15 @@ function criarStatRow({ label, m, v, sufixo = '' }) {
   return linha;
 }
 
-function secaoEstatisticas(estatisticas, nomeMandante, nomeVisitante) {
+function secaoEstatisticas(estatisticas, cartoes, nomeMandante, nomeVisitante) {
   const secao = document.createElement('div');
   secao.className = 'resumo-secao';
   const titulo = document.createElement('h3');
-  titulo.textContent = 'Estatísticas';
+  titulo.textContent = 'Estatísticas gerais';
   secao.appendChild(titulo);
 
   const card = document.createElement('div');
   card.className = 'stats-card';
-
-  const tabsWrap = document.createElement('div');
-  tabsWrap.className = 'stats-tabs';
 
   const teamsRow = document.createElement('div');
   teamsRow.className = 'stats-teams';
@@ -1542,30 +1941,10 @@ function secaoEstatisticas(estatisticas, nomeMandante, nomeVisitante) {
   teamsRow.append(nomeM, nomeV);
 
   const corpo = document.createElement('div');
+  corpo.appendChild(criarBarraPosse(estatisticas));
+  linhasEstatisticasGerais(estatisticas, cartoes).forEach((item) => corpo.appendChild(criarStatRow(item)));
 
-  function renderCorpo(chave) {
-    corpo.replaceChildren();
-    if (chave === 'principais') {
-      corpo.appendChild(criarBarraPosse(estatisticas));
-    }
-    linhasPorCategoria(chave, estatisticas).forEach((item) => corpo.appendChild(criarStatRow(item)));
-  }
-
-  Object.entries(CATEGORIAS_STATS).forEach(([chave, label]) => {
-    const btn = document.createElement('button');
-    btn.className = 'stats-tab-btn' + (chave === 'principais' ? ' active' : '');
-    btn.textContent = label;
-    btn.addEventListener('click', () => {
-      tabsWrap.querySelectorAll('.stats-tab-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderCorpo(chave);
-    });
-    tabsWrap.appendChild(btn);
-  });
-
-  renderCorpo('principais');
-
-  card.append(tabsWrap, teamsRow, corpo);
+  card.append(teamsRow, corpo);
   secao.appendChild(card);
   return secao;
 }
@@ -1578,6 +1957,25 @@ modalOverlay.addEventListener('click', (evento) => {
   if (evento.target === modalOverlay) {
     modalOverlay.classList.remove('active');
   }
+});
+
+// --- Voltar pro card anterior (quando um modal abre outro por cima, tipo
+// clicar num jogo de dentro do perfil do time) ---
+//
+// A view que abre por cima já reseta esse botão pra escondido sozinha (no
+// mesmo lugar que reseta o de baixar PDF). Por isso quem quer permitir voltar
+// só registra o callback DEPOIS que a função de abrir terminar (via then) -
+// assim ele não é apagado pelo reset da própria função que acabou de rodar.
+let modalVoltarCallback = null;
+
+function configurarVoltar(aoVoltar) {
+  modalVoltarCallback = aoVoltar;
+  modalVoltarBtn.hidden = false;
+}
+
+modalVoltarBtn.addEventListener('click', () => {
+  const aoVoltar = modalVoltarCallback;
+  if (aoVoltar) aoVoltar();
 });
 
 // --- Chat (assistente por IA via /api/chat - Claude, ChatGPT ou Gemini) ---
@@ -1609,6 +2007,9 @@ function salvarConfigChat(config) {
 function abrirConfigChat() {
   const config = carregarConfigChat();
   modalContent.replaceChildren();
+  modalBaixarPdfBtn.hidden = true;
+  modalVoltarBtn.hidden = true;
+  modalVoltarCallback = null;
 
   const titulo = document.createElement('h2');
   titulo.textContent = 'Configurar chat (IA)';
@@ -1764,6 +2165,9 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
   }
 
   modalContent.replaceChildren();
+  modalBaixarPdfBtn.hidden = true;
+  modalVoltarBtn.hidden = true;
+  modalVoltarCallback = null;
   const titulo = document.createElement('h2');
   titulo.textContent = 'Selecionar jogo pra analisar';
   modalContent.appendChild(titulo);
@@ -1812,6 +2216,9 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
 
 function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoConfirmar) {
   modalContent.replaceChildren();
+  modalBaixarPdfBtn.hidden = true;
+  modalVoltarBtn.hidden = true;
+  modalVoltarCallback = null;
   const titulo = document.createElement('h2');
   titulo.textContent = 'Selecionar jogos pra analisar';
   modalContent.appendChild(titulo);
@@ -1918,16 +2325,31 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
 
   btnConfirmar.addEventListener('click', async () => {
     btnConfirmar.disabled = true;
-    btnConfirmar.textContent = 'Analisando...';
     status.textContent = '';
     status.classList.remove('erro');
 
     const partidas = [...selecionados.values()];
-    // Promise.allSettled - um jogo sem histórico suficiente não pode derrubar
-    // a múltipla inteira, só fica de fora com um aviso.
-    const resultados = await Promise.allSettled(
-      partidas.map((partida) =>
-        fetchJSON('/api/chat/analise-automatica', {
+    const pernas = [];
+    let falhas = 0;
+    let incompletos = 0;
+    let naoTentados = 0;
+
+    // Um jogo de cada vez (não em paralelo) - antes de tentar cada um, confere
+    // quanto sobrou da cota. Se ela já zerou por causa de um jogo anterior
+    // desta mesma leva, os que restam nem são tentados (evita gastar tempo
+    // numa busca que a gente já sabe de antemão que vai ficar pela metade).
+    for (let i = 0; i < partidas.length; i += 1) {
+      const partida = partidas[i];
+      btnConfirmar.textContent = `Analisando ${i + 1} de ${partidas.length}...`;
+
+      const statusApi = await fetchJSON('/api/status').catch(() => null);
+      if (statusApi && statusApi.usoApi.hoje >= statusApi.usoApi.limite) {
+        naoTentados += partidas.length - i;
+        break;
+      }
+
+      try {
+        const resultado = await fetchJSON('/api/chat/analise-automatica', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1936,33 +2358,31 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
             numeroRodada: partida._numeroRodada,
             quantidade: quantidadePadrao,
           }),
-        }).then((resultado) => ({ partida, resultado })),
-      ),
-    );
+        });
 
-    const pernas = [];
-    let falhas = 0;
-    let incompletos = 0;
-    resultados.forEach((r) => {
-      if (r.status !== 'fulfilled' || r.value.resultado.erro) {
+        if (resultado.erro) {
+          falhas += 1;
+        } else if (resultado.incompleto) {
+          // Só entram jogos com o histórico 100% completo - um jogo que ficou
+          // pela metade porque a cota acabou no meio da busca fica de fora em
+          // vez de aparecer com um aviso, a pedido explícito do usuário.
+          incompletos += 1;
+        } else {
+          pernas.push({ partida, resultado });
+        }
+      } catch {
         falhas += 1;
-        return;
       }
-      // Só entram jogos com o histórico 100% completo - um jogo que ficou
-      // pela metade porque a cota acabou no meio da busca fica de fora em
-      // vez de aparecer com um aviso, a pedido explícito do usuário.
-      if (r.value.resultado.incompleto) {
-        incompletos += 1;
-        return;
-      }
-      pernas.push({ partida: r.value.partida, resultado: r.value.resultado });
-    });
+    }
 
     if (pernas.length === 0) {
-      status.textContent =
-        incompletos > 0
-          ? `Nenhum jogo com histórico 100% completo - ${incompletos} ficaram incompletos (cota da API acabou no meio da busca).`
-          : 'Não foi possível analisar nenhum dos jogos selecionados.';
+      const partes = [];
+      if (naoTentados > 0) partes.push(`${naoTentados} nem foram tentados porque a cota da API já tinha acabado`);
+      if (incompletos > 0) partes.push(`${incompletos} ficaram incompletos (cota acabou no meio da busca)`);
+      if (falhas > 0) partes.push(`${falhas} não puderam ser analisados`);
+      status.textContent = partes.length > 0
+        ? `Nenhum jogo com histórico 100% completo - ${partes.join(', ')}.`
+        : 'Não foi possível analisar nenhum dos jogos selecionados.';
       status.classList.add('erro');
       btnConfirmar.disabled = false;
       btnConfirmar.textContent = 'Analisar seleção';
@@ -1970,8 +2390,9 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
     }
 
     modalOverlay.classList.remove('active');
-    if (falhas > 0 || incompletos > 0) {
+    if (falhas > 0 || incompletos > 0 || naoTentados > 0) {
       const partes = [];
+      if (naoTentados > 0) partes.push(`${naoTentados} não tentado(s) (cota já esgotada)`);
       if (incompletos > 0) partes.push(`${incompletos} incompleto(s) (cota acabou no meio da busca)`);
       if (falhas > 0) partes.push(`${falhas} não puderam ser analisados`);
       mostrarToast(`${partes.join(', ')} - ficaram de fora.`, 'aviso');
@@ -2105,7 +2526,7 @@ conferirResultadosBtn?.addEventListener('click', () => {
   conferirResultadosBtn.textContent = 'Conferindo...';
   conferirResultados().finally(() => {
     conferirResultadosBtn.disabled = false;
-    conferirResultadosBtn.textContent = '✅ Conferir resultados';
+    conferirResultadosBtn.textContent = 'Conferir resultados';
   });
 });
 
@@ -2151,9 +2572,12 @@ function criarBlocoJogoPesquisado(perna, comTitulo) {
   if (resultado.mandante.contexto || resultado.visitante.contexto) {
     const contexto = document.createElement('p');
     contexto.className = 'pesquisado-contexto';
-    contexto.textContent = [resultado.mandante.contexto?.descricao, resultado.visitante.contexto?.descricao]
+    contexto.textContent = [
+      resultado.mandante.contexto ? `${mandante.nome}: ${resultado.mandante.contexto.descricao}` : null,
+      resultado.visitante.contexto ? `${visitante.nome}: ${resultado.visitante.contexto.descricao}` : null,
+    ]
       .filter(Boolean)
-      .join(' · ');
+      .join('. ');
     bloco.appendChild(contexto);
   }
 
@@ -2165,7 +2589,7 @@ function criarBlocoJogoPesquisado(perna, comTitulo) {
     const aviso = document.createElement('p');
     aviso.className = 'pesquisado-incompleto';
     aviso.textContent =
-      `⚠️ Cota da API acabou no meio da busca - ${partes.join(', ')}. Analisar esse confronto de novo ` +
+      `Cota da API acabou no meio da busca: ${partes.join(', ')}. Analisar esse confronto de novo ` +
       `mais tarde completa automaticamente o que faltou.`;
     bloco.appendChild(aviso);
   }
@@ -2186,7 +2610,7 @@ function criarBlocoJogoPesquisado(perna, comTitulo) {
   if (ressalvas.length > 0) {
     const aviso = document.createElement('p');
     aviso.className = 'pesquisado-incompleto';
-    aviso.textContent = `ℹ️ ${ressalvas.join(' · ')}.`;
+    aviso.textContent = `${ressalvas.join('; ')}.`;
     bloco.appendChild(aviso);
   }
 
@@ -2224,8 +2648,7 @@ function criarCardPesquisado(entrada) {
   ];
 
   const card = document.createElement('div');
-  card.className = 'pesquisado-card revelar';
-  revelarObserver.observe(card);
+  card.className = 'pesquisado-card';
 
   const cabecalho = document.createElement('div');
   cabecalho.className = 'pesquisado-cabecalho';
@@ -2330,6 +2753,37 @@ async function compartilharCard(elementoCard, nomeArquivo) {
   }, 'image/png');
 }
 
+// --- Baixar o conteúdo do modal (estatísticas, comparativo) como PDF ---
+
+async function baixarComoPDF(elemento, nomeArquivo) {
+  if (typeof html2canvas !== 'function' || typeof jspdf === 'undefined') {
+    mostrarToast('Não foi possível gerar o PDF agora (biblioteca não carregou).', 'aviso');
+    return;
+  }
+
+  let canvas;
+  try {
+    canvas = await html2canvas(elemento, { backgroundColor: '#101a2b', scale: 2 });
+  } catch {
+    mostrarToast('Não foi possível gerar o PDF agora.', 'aviso');
+    return;
+  }
+
+  const { jsPDF } = jspdf;
+  const pdf = new jsPDF({
+    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+    unit: 'px',
+    format: [canvas.width, canvas.height],
+  });
+  pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width, canvas.height);
+  pdf.save(`${nomeArquivo.replace(/[^\w\s-]/g, '')}.pdf`);
+}
+
+function habilitarBaixarPdf(nomeArquivo) {
+  modalBaixarPdfBtn.hidden = false;
+  modalBaixarPdfBtn.onclick = () => baixarComoPDF(modalContent, nomeArquivo);
+}
+
 // --- Aviso "faltam 30 min" pros jogos salvos ---
 //
 // Só funciona com o app aberto (aba ou PWA rodando) - notificação de
@@ -2373,7 +2827,7 @@ function verificarLembretes() {
       if (!perna.partidaId || !perna.data || jaNotificados.has(perna.partidaId)) return;
       const minutosParaComecar = (new Date(perna.data).getTime() - agora) / 60000;
       if (minutosParaComecar > 0 && minutosParaComecar <= MINUTOS_ANTES_AVISO) {
-        new Notification('Faltam 30 min ⏰', {
+        new Notification('Faltam 30 min', {
           body: `${perna.mandante.nome} x ${perna.visitante.nome} começa daqui a pouco.`,
           icon: '/icon.svg',
         });
@@ -2386,7 +2840,7 @@ function verificarLembretes() {
 function atualizarBotaoNotificar() {
   if (!notificarBtn) return;
   const ativo = notificacoesAtivas() && Notification?.permission === 'granted';
-  notificarBtn.textContent = ativo ? '🔔 Avisos ativados' : '🔔 Avisar 30 min antes';
+  notificarBtn.textContent = ativo ? 'Avisos ativados' : 'Avisar 30 min antes';
   notificarBtn.classList.toggle('ativo', ativo);
 }
 

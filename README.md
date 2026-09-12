@@ -71,7 +71,7 @@ Ao clicar num jogo com status `agendado`, a página abre um comparativo lado a l
 
 - Tag de posição/pontos/zona na tabela + até 2 rótulos curtos de estilo de jogo (ex: "Contra-ataque", "Ataque volumoso"), derivados das médias com limiares fixos documentados em `sinaisPerfil()` no [script.js](public/script.js)
 - Últimos resultados (bolinha verde = vitória, cinza = empate, vermelha = derrota)
-- **Abas por time** (`secaoDetalheTimes`): escolhe um dos dois times e mostra o perfil individual dele — médias do período, Top 5 atuações e as "Chances" (ver abaixo) — sem sair do modal. Clique no outro time pra trocar.
+- **Abas por time** (`secaoDetalheTimes`): escolhe um dos dois times e mostra o perfil individual dele — médias do período e Top 5 atuações — sem sair do modal. Clique no outro time pra trocar. As "Chances" (ver abaixo) ficam de fora da troca de aba: mostram os dois times ao mesmo tempo, porque são estatística da partida como um todo, não só de um lado do confronto.
 - **Estimativa estatística**: probabilidade de vitória/empate/derrota calculada com um modelo de Poisson simplificado (gols esperados = média de gols pró de um time combinada com a média de gols sofridos do outro). A mesma grade de Poisson também gera **"Ambas marcam"** e **"Mais de 2.5 gols"** (soma as combinações de placar onde os dois marcam, ou onde o total passa de 2.5).
 - **Palpites fortes**: em vez de sempre mostrar os mesmos mercados fixos (tipo "ambas marcam: 35%",
   um número baixo e pouco útil), `palpitesFortes()` no [script.js](public/script.js) junta os seis

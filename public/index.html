@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-title" content="Sport Analytics" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Karla:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -61,10 +61,10 @@
       </p>
       <div class="pesquisados-acoes">
         <button id="conferir-resultados-btn" type="button" class="pesquisados-acao-btn">
-          ✅ Conferir resultados
+          Conferir resultados
         </button>
         <button id="notificar-btn" type="button" class="pesquisados-acao-btn">
-          🔔 Avisar 30 min antes
+          Avisar 30 min antes
         </button>
       </div>
       <div id="acertometro" class="acertometro" hidden></div>
@@ -83,10 +83,11 @@
         <span>ou mais de chance num dos lados</span>
       </div>
       <p class="provaveis-aviso">
-        Calcula a estimativa (mesmo modelo de Poisson do comparativo) pra todos os jogos agendados da
-        rodada atual — gasta bem mais requisições que abrir um jogo por vez, por isso é sob demanda.
+        Escolhe o dia abaixo e calcula a estimativa (mesmo modelo de Poisson do comparativo) só dos
+        jogos daquele dia - assim não gasta a cota inteira de uma vez.
       </p>
-      <button id="btn-calcular-provaveis" class="rodada-nav-btn">Calcular jogos prováveis desta rodada</button>
+      <div id="provaveis-dias" class="datas-pills"></div>
+      <button id="btn-calcular-provaveis" class="rodada-nav-btn" disabled>Calcular jogos prováveis</button>
       <div id="provaveis-lista"></div>
     </section>
 
@@ -138,12 +139,17 @@
 
   <div id="modal-overlay" class="modal-overlay">
     <div class="modal">
+      <div class="modal-topo-esquerda">
+        <button id="modal-voltar" class="modal-voltar" type="button" title="Voltar" hidden>‹</button>
+        <button id="modal-baixar-pdf" class="modal-baixar-pdf" type="button" hidden>Baixar PDF</button>
+      </div>
       <button id="modal-close" class="modal-close">×</button>
       <div id="modal-content"></div>
     </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
