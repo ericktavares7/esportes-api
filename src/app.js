@@ -7,7 +7,7 @@ import timesRouter from './routes/times.routes.js';
 import chatRouter from './routes/chat.routes.js';
 import palpitesRouter from './routes/palpites.routes.js';
 import { usoApiHoje } from './db/cache.js';
-import { LIMITE_DIARIO_API } from './config/limites.js';
+import { LIMITE_DIARIO_API, LIMITE_DIARIO_GOAL_API } from './config/limites.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,11 +21,18 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Health check da API (separado da página, pra não conflitar com o index.html)
+// usoApi vem separado por provedor - API Futebol (100/dia) e GOAL API
+// (1000/dia, usada pela Série A e pela correção de escanteios/cartões da
+// Série B) tem cotas bem diferentes; misturar as duas num contador só faria
+// a Série A "estourar" a cota de 100 sem nem chegar perto da cota real dela.
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Sport Analytics rodando',
-    usoApi: { hoje: usoApiHoje(), limite: LIMITE_DIARIO_API },
+    usoApi: {
+      apiFutebol: { hoje: usoApiHoje('api-futebol'), limite: LIMITE_DIARIO_API },
+      goalApi: { hoje: usoApiHoje('goal-api'), limite: LIMITE_DIARIO_GOAL_API },
+    },
   });
 });
 

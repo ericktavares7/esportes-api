@@ -1,5 +1,14 @@
 import { gerarPalpites } from '../services/motorPalpites.js';
 
+// campeonato_id e time_id são numéricos na API Futebol, mas a Série A
+// (fonte GOAL API, ver [[project-serie-a-test]]) usa ids que não são número
+// ("goal-serie-a", e time_id em formato cuid tipo "cmr7ben..."). Converte só
+// quando o valor É de fato numérico; senão mantém a string original.
+function paraNumeroOuTexto(valor) {
+  const numero = Number(valor);
+  return Number.isNaN(numero) ? valor : numero;
+}
+
 export async function confronto(req, res, next) {
   try {
     const { campeonato, mandante, visitante, rodada } = req.query;
@@ -10,9 +19,9 @@ export async function confronto(req, res, next) {
     }
 
     const resultado = await gerarPalpites(
-      Number(campeonato),
-      Number(mandante),
-      Number(visitante),
+      paraNumeroOuTexto(campeonato),
+      paraNumeroOuTexto(mandante),
+      paraNumeroOuTexto(visitante),
       Number(rodada),
     );
 

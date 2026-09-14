@@ -17,10 +17,18 @@ db.exec(`
   )
 `);
 
+// Contagem por provedor (nao um total unico) - a API Futebol (100/dia) e a
+// GOAL API (1000/dia) tem cotas bem diferentes, e desde que a GOAL API
+// passou a alimentar a Serie A inteira (ver [[project-serie-a-test]]), um
+// contador so misturaria as duas e mostraria a Serie A "estourando" a cota
+// de 100 da API Futebol sem ter chegado nem perto da cota de verdade dela
+// (1000). "provider" e uma string curta tipo 'api-futebol'/'goal-api'.
 db.exec(`
-  CREATE TABLE IF NOT EXISTS uso_api (
-    dia TEXT PRIMARY KEY,
-    requisicoes INTEGER NOT NULL
+  CREATE TABLE IF NOT EXISTS uso_api_provider (
+    dia TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    requisicoes INTEGER NOT NULL,
+    PRIMARY KEY (dia, provider)
   )
 `);
 
@@ -31,19 +39,21 @@ const stmtSalvar = db.prepare(
 );
 
 const stmtIncrementarUso = db.prepare(
-  'INSERT INTO uso_api (dia, requisicoes) VALUES (?, 1) ' +
-    'ON CONFLICT(dia) DO UPDATE SET requisicoes = requisicoes + 1',
+  'INSERT INTO uso_api_provider (dia, provider, requisicoes) VALUES (?, ?, 1) ' +
+    'ON CONFLICT(dia, provider) DO UPDATE SET requisicoes = requisicoes + 1',
 );
-const stmtBuscarUso = db.prepare('SELECT requisicoes FROM uso_api WHERE dia = ?');
+const stmtBuscarUso = db.prepare('SELECT requisicoes FROM uso_api_provider WHERE dia = ? AND provider = ?');
 
 function diaDeHoje() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Quantas chamadas reais (nao vindas do cache) foram feitas pra API hoje.
-// So conta o que de fato saiu pra rede - HITs de cache nao contam.
-export function usoApiHoje() {
-  const linha = stmtBuscarUso.get(diaDeHoje());
+// Quantas chamadas reais (nao vindas do cache) foram feitas pra esse
+// provedor hoje. So conta o que de fato saiu pra rede - HITs de cache nao
+// contam. provider default 'api-futebol' mantem os callers antigos (que
+// nunca lidaram com GOAL API) funcionando sem precisar passar nada.
+export function usoApiHoje(provider = 'api-futebol') {
+  const linha = stmtBuscarUso.get(diaDeHoje(), provider);
   return linha?.requisicoes ?? 0;
 }
 
@@ -57,7 +67,11 @@ export function usoApiHoje() {
 // ttl pode ser um numero fixo de segundos, ou uma funcao (dados) => segundos
 // - assim o prazo de validade pode depender do proprio conteudo (ex: um jogo
 // ja encerrado guarda um TTL bem maior que um jogo ainda agendado).
-export async function comCache(chave, ttl, buscarDados) {
+//
+// provider identifica de qual API o contador de uso deve descontar
+// ('api-futebol' por padrao - os callers da API Futebol nao precisam passar
+// nada; goalApiService.js passa 'goal-api' explicitamente em toda chamada).
+export async function comCache(chave, ttl, buscarDados, provider = 'api-futebol') {
   const linha = stmtBuscar.get(chave);
   const agora = Date.now();
 
@@ -69,7 +83,7 @@ export async function comCache(chave, ttl, buscarDados) {
   console.log(`[cache] MISS ${chave}`);
   try {
     const dados = await buscarDados();
-    stmtIncrementarUso.run(diaDeHoje());
+    stmtIncrementarUso.run(diaDeHoje(), provider);
     const ttlSegundos = typeof ttl === 'function' ? ttl(dados) : ttl;
     stmtSalvar.run(chave, JSON.stringify(dados), agora + ttlSegundos * 1000);
     return dados;
@@ -81,7 +95,7 @@ export async function comCache(chave, ttl, buscarDados) {
     // então não conta. Sem isso o contador ficava sempre desincronizado do
     // real assim que a cota estourava, já que toda tentativa passava a falhar.
     if (err.response) {
-      stmtIncrementarUso.run(diaDeHoje());
+      stmtIncrementarUso.run(diaDeHoje(), provider);
     }
     if (linha) {
       console.log(`[cache] STALE ${chave} (API falhou, usando cópia vencida)`);

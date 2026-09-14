@@ -20,6 +20,11 @@
 
 import { buscarFormaTime } from './formaService.js';
 import { getTabela } from './apiFutebolService.js';
+import { CAMPEONATO_SERIE_A_ID, buscarTabelaSerieA } from './goalApiService.js';
+
+function buscarTabelaPorCampeonato(campeonatoId) {
+  return campeonatoId === CAMPEONATO_SERIE_A_ID ? buscarTabelaSerieA() : getTabela(campeonatoId);
+}
 
 const JOGOS_JANELA = 7; // "os 5 a 7 jogos mais recentes" - pede o teto, usa o que vier
 const AMOSTRA_FRACA = 3; // < 3 de qualquer lado => fraco / não recomendar
@@ -352,7 +357,7 @@ export async function gerarPalpites(campeonatoId, timeMandanteId, timeVisitanteI
   const [formaMandante, formaVisitante, tabela] = await Promise.all([
     buscarFormaTime(campeonatoId, timeMandanteId, numeroRodada, JOGOS_JANELA, true),
     buscarFormaTime(campeonatoId, timeVisitanteId, numeroRodada, JOGOS_JANELA, false),
-    getTabela(campeonatoId).catch(() => null),
+    buscarTabelaPorCampeonato(campeonatoId).catch(() => null),
   ]);
 
   const linhaMandante = tabela?.find((l) => l.time.time_id === timeMandanteId) ?? null;

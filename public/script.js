@@ -29,6 +29,10 @@ const acertometroEl = document.getElementById('acertometro');
 
 let rodadaExibida = null;
 
+// Precisa bater com CAMPEONATO_SERIE_A_ID em src/services/goalApiService.js -
+// usado só pra decidir qual cota mostrar no badge (API Futebol x GOAL API).
+const CAMPEONATO_SERIE_A_ID = 'goal-serie-a';
+
 async function fetchJSON(url, options) {
   const resposta = await fetch(url, options);
 
@@ -80,7 +84,11 @@ async function carregarUsoApi() {
   const badge = document.getElementById('uso-api-badge');
   try {
     const status = await fetchJSON('/api/status');
-    const { hoje, limite } = status.usoApi;
+    // Série A roda 100% na GOAL API (1000/dia); qualquer outro campeonato
+    // usa a API Futebol (100/dia, mais apertada) - o badge mostra a cota
+    // que de fato importa pro que está selecionado no momento.
+    const usandoSerieA = campeonatoSelect.value === CAMPEONATO_SERIE_A_ID;
+    const { hoje, limite } = usandoSerieA ? status.usoApi.goalApi : status.usoApi.apiFutebol;
     const pct = hoje / limite;
     badge.textContent = `${hoje}/${limite} hoje`;
     badge.classList.toggle('uso-api-aviso', pct >= 0.5 && pct < 0.9);
@@ -377,7 +385,7 @@ function timeLinhaJogos(time) {
   const linha = document.createElement('div');
   linha.className = 'time-linha';
   const img = document.createElement('img');
-  img.src = time.escudo;
+  if (time.escudo) img.src = time.escudo;
   img.alt = '';
   const nome = document.createElement('span');
   nome.textContent = time.nome_popular;
@@ -694,7 +702,7 @@ async function carregarTabela() {
     const wrap = document.createElement('div');
     wrap.className = 'time-cell';
     const img = document.createElement('img');
-    img.src = linha.time.escudo;
+    if (linha.time.escudo) img.src = linha.time.escudo;
     img.alt = '';
     const nome = document.createElement('span');
     nome.textContent = linha.time.nome_popular;
@@ -779,7 +787,7 @@ function linhaTime(time, placar) {
   linha.className = 'confronto-linha';
 
   const img = document.createElement('img');
-  img.src = time.escudo;
+  if (time.escudo) img.src = time.escudo;
   img.alt = '';
 
   const nome = document.createElement('span');
@@ -812,7 +820,7 @@ async function carregarArtilharia() {
     const li = document.createElement('li');
 
     const img = document.createElement('img');
-    img.src = item.time.escudo;
+    if (item.time.escudo) img.src = item.time.escudo;
     img.alt = '';
 
     const nome = document.createElement('span');
@@ -882,9 +890,12 @@ async function abrirFormaPreJogo(partida) {
 
   let tabela;
   try {
+    // mando=casa/fora - nunca mistura os jogos em casa do mandante com os
+    // jogos fora do visitante; cai pro histórico geral sozinho (com aviso)
+    // só quando não há amostra específica suficiente (ver mandoEspecifico).
     [formaMandante, formaVisitante, tabela] = await Promise.all([
-      fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
-      fetchJSON(`/api/times/${partida.time_visitante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}`),
+      fetchJSON(`/api/times/${partida.time_mandante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}&mando=casa`),
+      fetchJSON(`/api/times/${partida.time_visitante.time_id}/forma?campeonato=${campeonatoId}&antes=${antes}&quantidade=${quantidade}&mando=fora`),
       fetchJSON(`/api/campeonatos/${campeonatoId}/tabela`),
     ]);
   } catch (err) {
@@ -912,8 +923,19 @@ async function abrirFormaPreJogo(partida) {
   tagsRow.appendChild(tagContexto(linhaVisitante, formaVisitante.medias));
   modalContent.appendChild(tagsRow);
 
-  modalContent.appendChild(linhaResultados(partida.time_mandante.nome_popular, formaMandante.jogos));
-  modalContent.appendChild(linhaResultados(partida.time_visitante.nome_popular, formaVisitante.jogos));
+  modalContent.appendChild(linhaResultados(`${partida.time_mandante.nome_popular} (casa)`, formaMandante.jogos));
+  modalContent.appendChild(linhaResultados(`${partida.time_visitante.nome_popular} (fora)`, formaVisitante.jogos));
+
+  const avisosMando = [];
+  if (formaMandante.mandoEspecifico === false) {
+    avisosMando.push(`${partida.time_mandante.nome_popular} não tem jogos em casa suficientes nesse recorte - usando o histórico geral (casa + fora) até acumular mais.`);
+  }
+  if (formaVisitante.mandoEspecifico === false) {
+    avisosMando.push(`${partida.time_visitante.nome_popular} não tem jogos fora suficientes nesse recorte - usando o histórico geral (casa + fora) até acumular mais.`);
+  }
+  if (avisosMando.length > 0) {
+    modalContent.appendChild(linhaVazia(avisosMando.join(' ')));
+  }
 
   if (!formaMandante.medias || !formaVisitante.medias) {
     modalContent.appendChild(linhaVazia('Sem jogos anteriores suficientes para montar o comparativo.'));
@@ -923,8 +945,8 @@ async function abrirFormaPreJogo(partida) {
   modalContent.appendChild(
     secaoDetalheTimes(
       [
-        { nome: partida.time_mandante.nome_popular, forma: formaMandante },
-        { nome: partida.time_visitante.nome_popular, forma: formaVisitante },
+        { nome: `${partida.time_mandante.nome_popular} (casa)`, forma: formaMandante },
+        { nome: `${partida.time_visitante.nome_popular} (fora)`, forma: formaVisitante },
       ],
     ),
   );
@@ -1000,8 +1022,8 @@ function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linh
   if (linhaVisitante) linhas.push(`${nomeVisitante}: ${linhaVisitante.posicao}º, ${linhaVisitante.pontos} pts`);
   linhas.push('');
 
-  linhas.push(`Forma recente ${nomeMandante} (mais recente primeiro): ${formaMandante.jogos.map((j) => j.resultado).join(', ')}`);
-  linhas.push(`Forma recente ${nomeVisitante} (mais recente primeiro): ${formaVisitante.jogos.map((j) => j.resultado).join(', ')}`);
+  linhas.push(`Forma recente ${nomeMandante} em casa (mais recente primeiro): ${formaMandante.jogos.map((j) => j.resultado).join(', ')}`);
+  linhas.push(`Forma recente ${nomeVisitante} fora (mais recente primeiro): ${formaVisitante.jogos.map((j) => j.resultado).join(', ')}`);
   linhas.push('');
 
   linhas.push(`Médias (${nomeMandante} / ${nomeVisitante})`);
@@ -1718,7 +1740,7 @@ async function abrirResumo(partidaId) {
 
   modalContent.appendChild(secaoInformacoes(resumo));
   modalContent.appendChild(secaoGols(resumo.gols));
-  modalContent.appendChild(secaoCartoes(resumo.cartoes));
+  modalContent.appendChild(secaoCartoes(resumo.cartoes, resumo.dadosIndisponiveis?.cartoesIndividuais));
   modalContent.appendChild(secaoEstatisticas(resumo.estatisticas, resumo.cartoes, resumo.confronto.mandante, resumo.confronto.visitante));
 }
 
@@ -1750,7 +1772,9 @@ function montarTextoResumoJogo(resumo) {
   linhas.push(`Estatísticas gerais (${nomeMandante} / ${nomeVisitante})`);
   linhas.push(`Posse de bola: ${parsePercentual(resumo.estatisticas.mandante.posse_de_bola)}% / ${parsePercentual(resumo.estatisticas.visitante.posse_de_bola)}%`);
   linhasEstatisticasGerais(resumo.estatisticas, resumo.cartoes).forEach(({ label, m, v, sufixo = '' }) => {
-    linhas.push(`${label}: ${m}${sufixo} / ${v}${sufixo}`);
+    const textoM = m == null ? '—' : `${m}${sufixo}`;
+    const textoV = v == null ? '—' : `${v}${sufixo}`;
+    linhas.push(`${label}: ${textoM} / ${textoV}`);
   });
 
   return linhas.join('\n').trim();
@@ -1825,12 +1849,22 @@ function secaoGols(gols) {
   return secao;
 }
 
-function secaoCartoes(cartoes) {
+// indisponivel=true (só acontece na Série A/GOAL API - ver
+// [[project-serie-a-test]]) significa "a fonte não informa quem tomou
+// cartão nem em que minuto", não "não teve cartão" - por isso usa uma
+// mensagem diferente de "sem cartões registrados", que afirmaria um zero que
+// não foi de fato confirmado.
+function secaoCartoes(cartoes, indisponivel = false) {
   const secao = document.createElement('div');
   secao.className = 'resumo-secao';
   const titulo = document.createElement('h3');
   titulo.textContent = 'Cartões';
   secao.appendChild(titulo);
+
+  if (indisponivel) {
+    secao.appendChild(linhaVazia('Essa liga não informa cartão individual (quem/minuto) - só o total, na seção de estatísticas abaixo.'));
+    return secao;
+  }
 
   const todos = [
     ...cartoes.amarelo.mandante.map((c) => ({ ...c, tipo: 'Amarelo' })),
@@ -1875,6 +1909,10 @@ function parsePercentual(valor) {
 // dado pago de provedor tipo Opta, não dá pra replicar de graça); o que dá
 // pra mostrar de verdade é posse, finalizações, escanteios, faltas, cartões,
 // impedimentos, passes, desarmes e defesas do goleiro.
+// m/v podem vir null (não `cartoes.*.length`, que só existe quando a fonte
+// lista o evento individualmente) quando a liga não informa aquele dado -
+// hoje só acontece na Série A/GOAL API (cartões vermelhos e desarmes, ver
+// [[project-serie-a-test]]). criarStatRow mostra "—" nesse caso em vez de 0.
 function linhasEstatisticasGerais(estatisticas, cartoes) {
   const m = estatisticas.mandante;
   const v = estatisticas.visitante;
@@ -1884,8 +1922,8 @@ function linhasEstatisticasGerais(estatisticas, cartoes) {
     { label: 'Chutes no gol', m: m.finalizacao.no_gol, v: v.finalizacao.no_gol },
     { label: 'Escanteios', m: m.escanteios, v: v.escanteios },
     { label: 'Faltas cometidas', m: m.faltas, v: v.faltas },
-    { label: 'Cartões amarelos', m: cartoes.amarelo.mandante.length, v: cartoes.amarelo.visitante.length },
-    { label: 'Cartões vermelhos', m: cartoes.vermelho.mandante.length, v: cartoes.vermelho.visitante.length },
+    { label: 'Cartões amarelos', m: m.cartoesAmarelos !== undefined ? m.cartoesAmarelos : cartoes.amarelo.mandante.length, v: v.cartoesAmarelos !== undefined ? v.cartoesAmarelos : cartoes.amarelo.visitante.length },
+    { label: 'Cartões vermelhos', m: m.cartoesVermelhos !== undefined ? m.cartoesVermelhos : cartoes.vermelho.mandante.length, v: v.cartoesVermelhos !== undefined ? v.cartoesVermelhos : cartoes.vermelho.visitante.length },
     { label: 'Impedimentos', m: m.impedimentos, v: v.impedimentos },
     { label: 'Passes totais', m: m.passes.total, v: v.passes.total },
     { label: 'Precisão de passe', m: parsePercentual(m.passes.precisao), v: parsePercentual(v.passes.precisao), sufixo: '%' },
@@ -1926,17 +1964,21 @@ function criarStatRow({ label, m, v, sufixo = '' }) {
   const linha = document.createElement('div');
   linha.className = 'stat-row';
 
+  // m/v null = a fonte não tem esse dado (não é "confirmado zero") - mostra
+  // "—" sem destacar lado nenhum, em vez de comparar/formatar um null.
+  const indisponivel = m == null || v == null;
+
   const pillM = document.createElement('span');
-  pillM.className = 'stat-pill' + (m > v ? ' lead-mandante' : '');
-  pillM.textContent = `${m}${sufixo}`;
+  pillM.className = 'stat-pill' + (!indisponivel && m > v ? ' lead-mandante' : '');
+  pillM.textContent = m == null ? '—' : `${m}${sufixo}`;
 
   const labelEl = document.createElement('span');
   labelEl.className = 'label';
   labelEl.textContent = label;
 
   const pillV = document.createElement('span');
-  pillV.className = 'stat-pill' + (v > m ? ' lead-visitante' : '');
-  pillV.textContent = `${v}${sufixo}`;
+  pillV.className = 'stat-pill' + (!indisponivel && v > m ? ' lead-visitante' : '');
+  pillV.textContent = v == null ? '—' : `${v}${sufixo}`;
 
   linha.append(pillM, labelEl, pillV);
   return linha;
@@ -2362,8 +2404,11 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
       const partida = partidas[i];
       btnConfirmar.textContent = `Analisando ${i + 1} de ${partidas.length}...`;
 
+      // analise-automatica sempre passa pela API Futebol (não foi estendida
+      // pra Série A), então essa checagem de cota é sempre a dela mesmo,
+      // independente do campeonato selecionado no momento.
       const statusApi = await fetchJSON('/api/status').catch(() => null);
-      if (statusApi && statusApi.usoApi.hoje >= statusApi.usoApi.limite) {
+      if (statusApi && statusApi.usoApi.apiFutebol.hoje >= statusApi.usoApi.apiFutebol.limite) {
         naoTentados += partidas.length - i;
         break;
       }

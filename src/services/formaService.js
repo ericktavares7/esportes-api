@@ -1,4 +1,12 @@
 import { getRodada, getPartida } from './apiFutebolService.js';
+import {
+  buscarEstatisticasPartida,
+  buscarTodasFixturesSerieA,
+  buscarEstatisticasFixtureSerieA,
+  CAMPEONATO_SERIE_A_ID,
+} from './goalApiService.js';
+import { MAPEAMENTO_TIMES_GOAL_API } from '../config/mapeamentoGoalApi.js';
+import { GOAL_API_KEY } from '../config/env.js';
 import { comCache } from '../db/cache.js';
 
 // Anda pelas rodadas anteriores até achar N jogos já encerrados do time,
@@ -16,6 +24,10 @@ import { comCache } from '../db/cache.js';
 // apenasComoMandante: true = só jogos em casa, false = só jogos fora,
 // null/undefined = mistura os dois (comportamento original).
 export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade = 5, apenasComoMandante = null) {
+  if (campeonatoId === CAMPEONATO_SERIE_A_ID) {
+    return buscarFormaTimeSerieA(timeId, antesRodada, quantidade, apenasComoMandante);
+  }
+
   const chave = `forma:${campeonatoId}:${timeId}:${antesRodada}:${quantidade}:${apenasComoMandante}`;
 
   return comCache(
@@ -41,9 +53,11 @@ export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantid
       }
 
       const resultados = await Promise.allSettled(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
-      const jogos = resultados
-        .filter((r) => r.status === 'fulfilled')
-        .map((r) => montarLinhaForma(r.value, timeId));
+      const jogos = await Promise.all(
+        resultados
+          .filter((r) => r.status === 'fulfilled')
+          .map((r) => corrigirComGoalApi(montarLinhaForma(r.value, timeId), r.value, timeId)),
+      );
 
       return {
         jogos,
@@ -71,6 +85,111 @@ export async function buscarFormaComMando(campeonatoId, timeId, antesRodada, qua
 
   const geral = await buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade, null);
   return { ...geral, mandoEspecifico: false };
+}
+
+// Equivalente do buscarFormaTime, mas pra Série A (fonte única: GOAL API,
+// sem API Futebol nesse campeonato - ver [[project-serie-a-test]]). Como
+// buscarTodasFixturesSerieA() já traz o histórico completo da temporada em
+// cache (usado por Jogos/Tabela), dá pra filtrar o time direto nele em vez
+// de repetir a varredura rodada-por-rodada que a versão da API Futebol
+// precisa fazer (lá, cada rodada é uma chamada separada).
+async function buscarFormaTimeSerieA(timeId, antesRodada, quantidade, apenasComoMandante) {
+  const chave = `forma:${CAMPEONATO_SERIE_A_ID}:${timeId}:${antesRodada}:${quantidade}:${apenasComoMandante}`;
+
+  return comCache(
+    chave,
+    (dados) => (dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60),
+    async () => {
+      const todas = await buscarTodasFixturesSerieA();
+      const jogosDoTime = todas.filter((f) => f.homeTeamId === timeId || f.awayTeamId === timeId);
+      const numeroAlvo = Number(antesRodada);
+
+      // "antesRodada" é um NÚMERO de rodada, mas rodadas podem ser jogadas
+      // fora de ordem cronológica quando um confronto é adiado - visto de
+      // verdade: a 21ª rodada do Botafogo RJ ficou agendada pra 16/09,
+      // enquanto as rodadas 22 a 27 dele já tinham sido disputadas entre
+      // agosto e 12/09. Comparar só o número da rodada (`matchRound <
+      // antesRodada`) fazia esses jogos já encerrados sumirem do
+      // histórico por engano, mesmo tendo acontecido antes na realidade.
+      //
+      // apenasComoMandante !== null identifica quem chama: buscarFormaComMando
+      // (comparativo pré-jogo) e gerarPalpites sempre passam true/false - aí
+      // "antesRodada" é a rodada do confronto específico sendo analisado, e o
+      // corte certo é a data real do próprio jogo desse time nessa rodada.
+      // Já apenasComoMandante === null é o perfil de time (buscarFormaTime
+      // puro, sem filtro de mando) - a intenção ali é "forma recente até
+      // hoje", então usa a data atual direto, sem depender de rodada nenhuma.
+      let dataCorte;
+      if (apenasComoMandante === null) {
+        dataCorte = Date.now();
+      } else {
+        const fixtureReferencia = jogosDoTime.find((f) => Number(f.matchRound) === numeroAlvo);
+        dataCorte = fixtureReferencia ? new Date(fixtureReferencia.kickoffUtc).getTime() : Date.now();
+      }
+
+      const candidatos = jogosDoTime
+        .filter((f) => f.matchStatus === 'FINISHED' && new Date(f.kickoffUtc).getTime() < dataCorte)
+        .filter((f) => {
+          const ehMandante = f.homeTeamId === timeId;
+          if (apenasComoMandante === true && !ehMandante) return false;
+          if (apenasComoMandante === false && ehMandante) return false;
+          return true;
+        })
+        .sort((a, b) => new Date(b.kickoffUtc).getTime() - new Date(a.kickoffUtc).getTime())
+        .slice(0, quantidade);
+
+      const resultados = await Promise.allSettled(
+        candidatos.map(async (fixture) => {
+          const stats = await buscarEstatisticasFixtureSerieA(fixture.id);
+          return montarLinhaFormaSerieA(fixture, stats, timeId);
+        }),
+      );
+      const jogos = resultados.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+
+      return {
+        jogos,
+        medias: calcularMedias(jogos),
+        jogosTentados: candidatos.length,
+        jogosObtidos: jogos.length,
+      };
+    },
+  );
+}
+
+function montarLinhaFormaSerieA(fixture, stats, timeId) {
+  const ehMandante = fixture.homeTeamId === timeId;
+  const golsPro = ehMandante ? Number(fixture.homeTeamScore) : Number(fixture.awayTeamScore);
+  const golsContra = ehMandante ? Number(fixture.awayTeamScore) : Number(fixture.homeTeamScore);
+  const adversario = ehMandante ? fixture.awayTeamName : fixture.homeTeamName;
+
+  let resultado = 'E';
+  if (golsPro > golsContra) resultado = 'V';
+  if (golsPro < golsContra) resultado = 'D';
+
+  // Pega o valor do lado do time (mandante/visitante) e do adversário a
+  // partir do par casa/fora que buscarEstatisticasFixtureSerieA devolve.
+  const pegar = (casa, fora) => (ehMandante ? casa : fora) ?? 0;
+  const pegarContra = (casa, fora) => (ehMandante ? fora : casa) ?? 0;
+
+  return {
+    partidaId: fixture.id,
+    data: fixture.kickoffUtc,
+    adversario,
+    mandante: ehMandante,
+    placar: `${golsPro} x ${golsContra}`,
+    resultado,
+    golsPro,
+    golsContra,
+    escanteios: pegar(stats.escanteiosCasa, stats.escanteiosFora),
+    escanteiosContra: pegarContra(stats.escanteiosCasa, stats.escanteiosFora),
+    finalizacoes: pegar(stats.finalizacoesCasa, stats.finalizacoesFora),
+    chutesNoGol: pegar(stats.chutesNoGolCasa, stats.chutesNoGolFora),
+    faltas: pegar(stats.faltasCasa, stats.faltasFora),
+    impedimentos: pegar(stats.impedimentosCasa, stats.impedimentosFora),
+    cartoesAmarelos: pegar(stats.cartoesCasa, stats.cartoesFora),
+    cartoesAmarelosContra: pegarContra(stats.cartoesCasa, stats.cartoesFora),
+    posseDeBola: pegar(stats.posseCasa, stats.posseFora),
+  };
 }
 
 function montarLinhaForma(partida, timeId) {
@@ -109,6 +228,48 @@ function montarLinhaForma(partida, timeId) {
     cartoesAmarelos: cartoesAmarelos.length,
     cartoesAmarelosContra: cartoesAmarelosAdversario.length,
     posseDeBola: parseInt(stats.posse_de_bola, 10) || 0,
+  };
+}
+
+// A API Futebol mostrou contagem errada de escanteios/cartões em vários jogos
+// checados manualmente contra Sofascore/ge.globo (sempre a menos, nunca a
+// mais - sugere bug de contagem na fonte deles, não aleatório). A GOAL API
+// bateu certo nos mesmos jogos, então esses dois campos são sobrescritos por
+// ela quando os dois times do confronto estão mapeados e ela tem o dado.
+//
+// Resto do jogo (placar, escalação, rodada etc.) continua vindo só da API
+// Futebol, que se mostrou confiável nesses outros campos - a troca é
+// cirúrgica, não uma substituição de fonte inteira. Se a GOAL API falhar,
+// não tiver a chave configurada, ou o jogo não estiver nela, mantém o valor
+// da API Futebol sem quebrar nada (silenciosamente pior, não ausente).
+async function corrigirComGoalApi(linha, partida, timeId) {
+  if (!GOAL_API_KEY) return linha;
+
+  const goalIdMandante = MAPEAMENTO_TIMES_GOAL_API[partida.time_mandante.time_id];
+  const goalIdVisitante = MAPEAMENTO_TIMES_GOAL_API[partida.time_visitante.time_id];
+  if (!goalIdMandante || !goalIdVisitante) return linha;
+
+  let stats;
+  try {
+    stats = await buscarEstatisticasPartida(goalIdMandante, goalIdVisitante, partida.data_realizacao_iso);
+  } catch (err) {
+    console.warn(`[goal-api] Falha ao corrigir escanteios/cartões da partida ${partida.partida_id}: ${err.message}`);
+    return linha;
+  }
+  if (!stats) return linha;
+
+  const ehMandante = partida.time_mandante.time_id === timeId;
+  const escanteios = ehMandante ? stats.escanteiosCasa : stats.escanteiosFora;
+  const escanteiosContra = ehMandante ? stats.escanteiosFora : stats.escanteiosCasa;
+  const cartoesAmarelos = ehMandante ? stats.cartoesCasa : stats.cartoesFora;
+  const cartoesAmarelosContra = ehMandante ? stats.cartoesFora : stats.cartoesCasa;
+
+  return {
+    ...linha,
+    escanteios: escanteios ?? linha.escanteios,
+    escanteiosContra: escanteiosContra ?? linha.escanteiosContra,
+    cartoesAmarelos: cartoesAmarelos ?? linha.cartoesAmarelos,
+    cartoesAmarelosContra: cartoesAmarelosContra ?? linha.cartoesAmarelosContra,
   };
 }
 
