@@ -76,10 +76,12 @@ export async function buscarFormaComMando(campeonatoId, timeId, antesRodada, qua
 function montarLinhaForma(partida, timeId) {
   const ehMandante = partida.time_mandante.time_id === timeId;
   const stats = ehMandante ? partida.estatisticas.mandante : partida.estatisticas.visitante;
+  const statsAdversario = ehMandante ? partida.estatisticas.visitante : partida.estatisticas.mandante;
   const golsPro = ehMandante ? partida.placar_mandante : partida.placar_visitante;
   const golsContra = ehMandante ? partida.placar_visitante : partida.placar_mandante;
   const adversario = ehMandante ? partida.time_visitante : partida.time_mandante;
   const cartoesAmarelos = (ehMandante ? partida.cartoes?.amarelo?.mandante : partida.cartoes?.amarelo?.visitante) ?? [];
+  const cartoesAmarelosAdversario = (ehMandante ? partida.cartoes?.amarelo?.visitante : partida.cartoes?.amarelo?.mandante) ?? [];
 
   let resultado = 'E';
   if (golsPro > golsContra) resultado = 'V';
@@ -95,11 +97,17 @@ function montarLinhaForma(partida, timeId) {
     golsPro,
     golsContra,
     escanteios: stats.escanteios,
+    // "Contra" aqui é o que o ADVERSÁRIO fez naquela mesma partida (não é
+    // "escanteios sofridos" no sentido defensivo) - serve pra reconstruir o
+    // total real da partida (escanteios/cartões dos dois lados somados) sem
+    // precisar buscar o jogo de novo.
+    escanteiosContra: statsAdversario.escanteios,
     finalizacoes: stats.finalizacao.total,
     chutesNoGol: stats.finalizacao.no_gol,
     faltas: stats.faltas,
     impedimentos: stats.impedimentos,
     cartoesAmarelos: cartoesAmarelos.length,
+    cartoesAmarelosContra: cartoesAmarelosAdversario.length,
     posseDeBola: parseInt(stats.posse_de_bola, 10) || 0,
   };
 }

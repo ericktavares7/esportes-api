@@ -5,6 +5,7 @@ import matchesRouter from './routes/matches.routes.js';
 import campeonatosRouter from './routes/campeonatos.routes.js';
 import timesRouter from './routes/times.routes.js';
 import chatRouter from './routes/chat.routes.js';
+import palpitesRouter from './routes/palpites.routes.js';
 import { usoApiHoje } from './db/cache.js';
 import { LIMITE_DIARIO_API } from './config/limites.js';
 
@@ -32,6 +33,7 @@ app.use('/api/matches', matchesRouter);
 app.use('/api/campeonatos', campeonatosRouter);
 app.use('/api/times', timesRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/palpites', palpitesRouter);
 
 // Middleware de erro: fica por último, o Express só chama isso quando
 // algum handler faz next(err). Centraliza o tratamento de falhas da API externa

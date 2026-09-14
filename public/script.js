@@ -867,13 +867,14 @@ async function abrirFormaPreJogo(partida) {
   let formaVisitante;
   let linhaMandante;
   let linhaVisitante;
+  let resultadoPalpites = null;
   // Os dados só terminam de carregar mais abaixo - o botão lê as variáveis
   // no momento do clique, então pode ser criado aqui em cima mesmo assim.
   modalContent.appendChild(
     botaoCopiar((botao) =>
       copiarTexto(botao, () =>
         formaMandante?.medias && formaVisitante?.medias
-          ? montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linhaMandante, linhaVisitante)
+          ? montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linhaMandante, linhaVisitante, resultadoPalpites)
           : null,
       ),
     ),
@@ -893,6 +894,17 @@ async function abrirFormaPreJogo(partida) {
 
   linhaMandante = tabela.find((l) => l.time.time_id === partida.time_mandante.time_id);
   linhaVisitante = tabela.find((l) => l.time.time_id === partida.time_visitante.time_id);
+
+  // Motor de palpites (casa/fora + últimos 5-7 jogos) busca por conta própria
+  // e pode falhar sem derrubar o resto do comparativo - por isso fica fora do
+  // Promise.all de cima e com o próprio try/catch.
+  try {
+    resultadoPalpites = await fetchJSON(
+      `/api/palpites/confronto?campeonato=${campeonatoId}&mandante=${partida.time_mandante.time_id}&visitante=${partida.time_visitante.time_id}&rodada=${antes}`,
+    );
+  } catch {
+    resultadoPalpites = null;
+  }
 
   const tagsRow = document.createElement('div');
   tagsRow.className = 'forma-tags-linha';
@@ -920,12 +932,66 @@ async function abrirFormaPreJogo(partida) {
   modalContent.appendChild(
     secaoProbabilidade(partida.time_mandante.nome_popular, partida.time_visitante.nome_popular, formaMandante.medias, formaVisitante.medias),
   );
+
+  if (resultadoPalpites) {
+    modalContent.appendChild(secaoPalpitesMotor(resultadoPalpites));
+  }
+}
+
+// Palpites do motor casa/fora (src/services/motorPalpites.js) - só mostra
+// mercados forte/moderado, cada um com sua justificativa. "Fraco" nunca
+// chega até aqui (o próprio backend já filtra antes de responder).
+function secaoPalpitesMotor(resultado) {
+  const secao = document.createElement('div');
+  secao.className = 'resumo-secao';
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'Palpites recomendados';
+  secao.appendChild(titulo);
+
+  if (resultado.palpites.length === 0) {
+    secao.appendChild(linhaVazia('Nenhum mercado com sinal forte o bastante pra recomendar nesse confronto.'));
+  } else {
+    const lista = document.createElement('div');
+    lista.className = 'palpites-motor-lista';
+    resultado.palpites.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = `palpite-motor-item palpite-motor-${p.confianca}`;
+
+      const cabecalhoItem = document.createElement('div');
+      cabecalhoItem.className = 'palpite-motor-cabecalho';
+      const nomeMercado = document.createElement('span');
+      nomeMercado.className = 'palpite-motor-mercado';
+      // Handicap já embute a linha na própria direção ("Time -4.1") - só
+      // acrescenta linha_sugerida separado quando ela ainda não aparece ali.
+      const jaTemLinha = p.linha_sugerida != null && p.direcao.includes(String(p.linha_sugerida));
+      const linha = p.linha_sugerida != null && !jaTemLinha ? ` ${p.direcao} ${p.linha_sugerida}` : ` ${p.direcao}`;
+      nomeMercado.textContent = `${p.mercado}:${linha}`;
+      const selo = document.createElement('span');
+      selo.className = `palpite-motor-selo palpite-motor-selo-${p.confianca}`;
+      selo.textContent = p.confianca;
+      cabecalhoItem.append(nomeMercado, selo);
+      item.appendChild(cabecalhoItem);
+
+      item.appendChild(el2('p', 'palpite-motor-justificativa', p.justificativa));
+      lista.appendChild(item);
+    });
+    secao.appendChild(lista);
+  }
+
+  if (resultado.avisos?.length > 0) {
+    const avisos = document.createElement('p');
+    avisos.className = 'prob-nota';
+    avisos.textContent = resultado.avisos.join(' ');
+    secao.appendChild(avisos);
+  }
+
+  return secao;
 }
 
 // Texto simples do comparativo pré-jogo (contexto, forma recente, médias e
 // estimativa) pra colar em qualquer lugar - reaproveita os mesmos cálculos
 // já usados nas seções visuais.
-function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linhaMandante, linhaVisitante) {
+function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linhaMandante, linhaVisitante, resultadoPalpites) {
   const nomeMandante = partida.time_mandante.nome_popular;
   const nomeVisitante = partida.time_visitante.nome_popular;
   const linhas = [`${nomeMandante} x ${nomeVisitante}`, ''];
@@ -949,11 +1015,14 @@ function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linh
   linhas.push(`${nomeMandante} ${estimativa.vitoriaMandante}% - Empate ${estimativa.empate}% - ${nomeVisitante} ${estimativa.vitoriaVisitante}%`);
   linhas.push(`Gols esperados: ${nomeMandante} ${estimativa.xgMandante} x ${estimativa.xgVisitante} ${nomeVisitante}`);
 
-  const fortes = palpitesFortes(estimativa, nomeMandante, nomeVisitante);
-  if (fortes.length > 0) {
+  if (resultadoPalpites?.palpites?.length > 0) {
     linhas.push('');
-    linhas.push('Palpites fortes:');
-    fortes.forEach(({ label, valor }) => linhas.push(`- ${label}: ${valor}%`));
+    linhas.push('Palpites recomendados:');
+    resultadoPalpites.palpites.forEach((p) => {
+      const jaTemLinha = p.linha_sugerida != null && p.direcao.includes(String(p.linha_sugerida));
+      const linha = p.linha_sugerida != null && !jaTemLinha ? `${p.direcao} ${p.linha_sugerida}` : p.direcao;
+      linhas.push(`- ${p.mercado}: ${linha} (${p.confianca})`);
+    });
   }
 
   return linhas.join('\n').trim();
@@ -1195,56 +1264,7 @@ function criarBarraProbabilidade(nomeMandante, nomeVisitante, estimativa) {
   });
   card.appendChild(legenda);
 
-  const fortes = palpitesFortes(estimativa, nomeMandante, nomeVisitante);
-  if (fortes.length > 0) {
-    const bloco = document.createElement('div');
-    bloco.className = 'prob-palpites-fortes';
-
-    const titulo = document.createElement('div');
-    titulo.className = 'prob-palpites-titulo';
-    titulo.textContent = 'Palpites fortes';
-    bloco.appendChild(titulo);
-
-    const lista = document.createElement('div');
-    lista.className = 'prob-mercados-extra';
-    fortes.forEach(({ label, valor }) => {
-      const chip = document.createElement('span');
-      chip.className = 'mercado-chip mercado-chip-forte';
-      chip.textContent = `${label}: ${valor}%`;
-      lista.appendChild(chip);
-    });
-    bloco.appendChild(lista);
-    card.appendChild(bloco);
-  } else {
-    const semForte = document.createElement('p');
-    semForte.className = 'prob-nota';
-    semForte.textContent = 'Nenhum palpite forte pra esse jogo - times parecem equilibrados.';
-    card.appendChild(semForte);
-  }
-
   return card;
-}
-
-// Junta todos os mercados calculados (vitória/empate/derrota, ambas marcam,
-// mais/menos de 2.5 gols) e devolve só os que passam de um limiar de
-// confiança, do maior pro menor - em vez de sempre mostrar os mesmos
-// números fixos (tipo "ambas marcam") mesmo quando o jogo não indica nada
-// forte de um lado ou de outro.
-function palpitesFortes(estimativa, nomeMandante, nomeVisitante, limiar = 60) {
-  const candidatos = [
-    { label: `Vitória de ${nomeMandante}`, valor: estimativa.vitoriaMandante },
-    { label: 'Empate', valor: estimativa.empate },
-    { label: `Vitória de ${nomeVisitante}`, valor: estimativa.vitoriaVisitante },
-  ];
-  if (estimativa.ambasMarcam != null) {
-    candidatos.push({ label: 'Ambas marcam', valor: estimativa.ambasMarcam });
-    candidatos.push({ label: 'Não ambas marcam', valor: 100 - estimativa.ambasMarcam });
-  }
-  if (estimativa.maisDe25Gols != null) {
-    candidatos.push({ label: 'Mais de 2.5 gols', valor: estimativa.maisDe25Gols });
-    candidatos.push({ label: 'Menos de 2.5 gols', valor: 100 - estimativa.maisDe25Gols });
-  }
-  return candidatos.filter((c) => c.valor >= limiar).sort((a, b) => b.valor - a.valor);
 }
 
 function secaoProbabilidade(nomeMandante, nomeVisitante, mediasMandante, mediasVisitante) {

@@ -1839,3 +1839,66 @@ main {
   font-weight: 600;
 }
 
+/* --- Palpites do motor casa/fora (src/services/motorPalpites.js) --- */
+
+.palpites-motor-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.palpite-motor-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.palpite-motor-forte {
+  border-left-color: var(--accent);
+}
+
+.palpite-motor-moderado {
+  border-left-color: var(--yellow);
+}
+
+.palpite-motor-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.palpite-motor-mercado {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.palpite-motor-selo {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.palpite-motor-selo-forte {
+  background: var(--accent-dark);
+  color: var(--accent);
+}
+
+.palpite-motor-selo-moderado {
+  background: rgba(219, 163, 39, 0.16);
+  color: var(--yellow);
+}
+
+.palpite-motor-justificativa {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
