@@ -301,14 +301,28 @@ function renderJogosPorData(partidas) {
   const chaves = [...grupos.keys()];
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
-  // Prioriza o primeiro dia de hoje em diante (mais próximo do atual); se a
-  // rodada inteira já ficou no passado, cai pro último dia (o mais recente).
-  let chaveInicial = chaves.find((chave) => {
+  const diffDiasDe = (chave) => {
     const iso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
     const data = new Date(iso);
     data.setHours(0, 0, 0, 0);
-    return data >= hoje;
-  }) ?? chaves[chaves.length - 1];
+    return Math.round((data - hoje) / 86400000);
+  };
+
+  // Prioriza o primeiro dia de hoje em diante (mais próximo do atual); se a
+  // rodada inteira já ficou no passado, cai pro último dia (o mais recente).
+  let chaveInicial = chaves.find((chave) => diffDiasDe(chave) >= 0) ?? chaves[chaves.length - 1];
+
+  // Uma "rodada" pode ter datas bem espalhadas quando um jogo específico foi
+  // remarcado bem depois dos outros da mesma rodada (visto de verdade na
+  // Série A: 9 jogos de uma rodada em julho + 1 só, adiado, em setembro) -
+  // sem esse filtro, a fileira de pílulas mistura "47 dias atrás" com "em 2
+  // dias", poluindo a navegação com data velha que ninguém quer ver de cara.
+  // Só esconde o que é antigo demais (> JANELA_DIAS_RECENTES) quando existe
+  // algo mais recente/futuro pra mostrar no lugar - se a rodada inteira já é
+  // velha (navegando pelo histórico com "<"), continua mostrando tudo.
+  const JANELA_DIAS_RECENTES = 5;
+  const chavesRelevantes = chaves.filter((chave) => diffDiasDe(chave) >= -JANELA_DIAS_RECENTES);
+  const chavesPills = chavesRelevantes.length > 0 ? chavesRelevantes : chaves;
 
   function mostrarGrupo(chave) {
     const jogosDoDia = grupos.get(chave);
@@ -331,7 +345,7 @@ function renderJogosPorData(partidas) {
     });
   }
 
-  chaves.forEach((chave) => {
+  chavesPills.forEach((chave) => {
     const jogosDoDia = grupos.get(chave);
     const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
 
