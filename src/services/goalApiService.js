@@ -309,12 +309,28 @@ export async function buscarRodadaSerieA(numero) {
     .map(mapearPartidaSerieA)
     .sort((a, b) => (a.data_realizacao_iso ?? '').localeCompare(b.data_realizacao_iso ?? ''));
 
-  const numerosRodadas = [...new Set(todas.map((f) => Number(f.matchRound)))]
-    .filter((n) => !Number.isNaN(n))
-    .sort((a, b) => a - b);
-  const idx = numerosRodadas.indexOf(numeroAlvo);
-  const anterior = idx > 0 ? numerosRodadas[idx - 1] : null;
-  const proxima = idx >= 0 && idx < numerosRodadas.length - 1 ? numerosRodadas[idx + 1] : null;
+  // "Rodada anterior"/"próxima rodada" por ordem CRONOLÓGICA (data real do
+  // jogo), não por número - número+1/número-1 quebra quando um confronto é
+  // adiado bem além dos vizinhos numéricos da própria rodada (visto de
+  // verdade: rodada 21 com jogo adiado pra 16/09, enquanto a rodada 22 já
+  // tinha sido disputada em 09/08 - clicar "próxima" a partir da 21 caía na
+  // 22, voltando 5 semanas no tempo em vez de avançar). Pega a rodada dona
+  // do próximo/anterior jogo cronológico fora dos limites de data desta
+  // rodada (min/max de todos os seus próprios jogos, não só um).
+  const datasRodada = daRodada.map((f) => new Date(f.kickoffUtc).getTime()).filter((t) => !Number.isNaN(t));
+  const minData = datasRodada.length > 0 ? Math.min(...datasRodada) : null;
+  const maxData = datasRodada.length > 0 ? Math.max(...datasRodada) : null;
+
+  const outras = todas.filter((f) => Number(f.matchRound) !== numeroAlvo && f.kickoffUtc);
+  const rodadaDoExtremo = (lista, escolherMelhor) =>
+    lista.length > 0 ? Number(lista.reduce(escolherMelhor).matchRound) : null;
+
+  const posteriores = maxData != null ? outras.filter((f) => new Date(f.kickoffUtc).getTime() > maxData) : [];
+  const anterioresCandidatos = minData != null ? outras.filter((f) => new Date(f.kickoffUtc).getTime() < minData) : [];
+
+  const proxima = rodadaDoExtremo(posteriores, (a, b) => (new Date(a.kickoffUtc) < new Date(b.kickoffUtc) ? a : b));
+  const anterior = rodadaDoExtremo(anterioresCandidatos, (a, b) => (new Date(a.kickoffUtc) > new Date(b.kickoffUtc) ? a : b));
+
   const todasEncerradas = partidas.length > 0 && partidas.every((p) => p.status === 'finalizado');
 
   return {
