@@ -375,13 +375,34 @@ export async function buscarCampeonatoInfoSerieA() {
   const todas = await buscarTodasFixturesSerieA();
   const numeros = todas.map((f) => Number(f.matchRound)).filter((n) => !Number.isNaN(n));
 
+  // "Rodada atual" = a rodada do jogo (de qualquer rodada) mais próximo de
+  // hoje, priorizando hoje/futuro sobre passado - não "menor número de
+  // rodada com algo pendente". Essa segunda regra quebra quando um confronto
+  // específico é adiado bem além dos outros jogos da própria rodada (visto
+  // de verdade: a rodada 21 tinha 1 jogo, Botafogo x Grêmio, adiado pra
+  // 16/09, enquanto a rodada 27 já tinha jogo acontecendo HOJE - a regra
+  // antiga escolhia a rodada 21, escondendo o jogo de hoje).
+  //
+  // Prioriza estritamente o mais próximo NO FUTURO (não a menor distância
+  // absoluta): um jogo de ontem e um de amanhã ficam empatados em distância
+  // absoluta, mas o de amanhã é o que interessa mostrar primeiro - mesmo
+  // critério já usado em chaveInicial (public/script.js) e
+  // buscarFormaTimeSerieA (formaService.js) pra decidir "o que é relevante
+  // agora" nessa liga.
   let rodadaAtual = null;
   if (numeros.length > 0) {
-    const agendadas = todas
-      .filter((f) => f.matchStatus !== 'FINISHED')
-      .map((f) => Number(f.matchRound))
-      .filter((n) => !Number.isNaN(n));
-    rodadaAtual = agendadas.length > 0 ? Math.min(...agendadas) : Math.max(...numeros);
+    const agora = Date.now();
+    const comData = todas
+      .filter((f) => !Number.isNaN(Number(f.matchRound)) && f.kickoffUtc)
+      .map((f) => ({ rodada: Number(f.matchRound), diff: new Date(f.kickoffUtc).getTime() - agora }));
+
+    const futuras = comData.filter((f) => f.diff >= 0).sort((a, b) => a.diff - b.diff);
+    if (futuras.length > 0) {
+      rodadaAtual = futuras[0].rodada;
+    } else {
+      const passadas = comData.sort((a, b) => b.diff - a.diff);
+      rodadaAtual = passadas[0]?.rodada ?? Math.max(...numeros);
+    }
   }
 
   return {

@@ -171,8 +171,7 @@ function temJogoAtualOuFuturo(partidas) {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   return partidas.some((partida) => {
-    const iso = partida.data_realizacao_iso ?? partida.data_realizacao;
-    const data = new Date(iso);
+    const data = new Date(dataSeguraDoDia(partida.data_realizacao) ?? partida.data_realizacao_iso);
     data.setHours(0, 0, 0, 0);
     return data >= hoje;
   });
@@ -246,6 +245,23 @@ btnRodadaProxima.addEventListener('click', async () => {
   }
 });
 
+// Deriva uma data-hora "segura" (meio-dia) a partir de data_realizacao
+// ("DD/MM/AAAA") - mais confiável que usar data_realizacao_iso (o horário
+// UTC do apito) pra decidir QUE DIA é um jogo. Quando o horário ainda não
+// foi confirmado, a GOAL API manda o apito como meia-noite UTC - que em
+// Brasília (UTC-3) já é 21h do dia ANTERIOR, então um `new Date(iso)` direto
+// "empurra" a data um dia pra trás (visto de verdade: jogo de 12/09
+// aparecendo com rótulo "11/09" na pílula). Meio-dia absorve qualquer fuso
+// razoável sem esse risco; data_realizacao_iso continua sendo a fonte certa
+// pra HORÁRIO exato (ordenação por minuto, texto de "17:30" etc), só não
+// pra "que dia" mostrar.
+function dataSeguraDoDia(dataRealizacao) {
+  if (!dataRealizacao) return dataRealizacao;
+  const [dia, mes, ano] = dataRealizacao.split('/');
+  if (!dia || !mes || !ano) return dataRealizacao;
+  return `${ano}-${mes}-${dia}T12:00:00`;
+}
+
 function formatarData(dataIso) {
   const data = new Date(dataIso);
   const texto = data.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
@@ -302,8 +318,7 @@ function renderJogosPorData(partidas) {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   const diffDiasDe = (chave) => {
-    const iso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
-    const data = new Date(iso);
+    const data = new Date(dataSeguraDoDia(chave));
     data.setHours(0, 0, 0, 0);
     return Math.round((data - hoje) / 86400000);
   };
@@ -326,7 +341,7 @@ function renderJogosPorData(partidas) {
 
   function mostrarGrupo(chave) {
     const jogosDoDia = grupos.get(chave);
-    const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
+    const dataIso = dataSeguraDoDia(chave);
 
     jogosLista.replaceChildren();
     const grupo = document.createElement('div');
@@ -346,8 +361,7 @@ function renderJogosPorData(partidas) {
   }
 
   chavesPills.forEach((chave) => {
-    const jogosDoDia = grupos.get(chave);
-    const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
+    const dataIso = dataSeguraDoDia(chave);
 
     const pill = document.createElement('button');
     pill.className = 'data-pill';
@@ -504,15 +518,14 @@ async function carregarDiasProvaveis() {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
     const chaveInicial = chaves.find((chave) => {
-      const iso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
-      const data = new Date(iso);
+      const data = new Date(dataSeguraDoDia(chave));
       data.setHours(0, 0, 0, 0);
       return data >= hoje;
     }) ?? chaves[chaves.length - 1];
 
     chaves.forEach((chave) => {
       const jogosDoDia = grupos.get(chave);
-      const dataIso = jogosDoDia[0].data_realizacao_iso ?? chave;
+      const dataIso = dataSeguraDoDia(chave);
 
       const pill = document.createElement('button');
       pill.type = 'button';
@@ -529,7 +542,7 @@ async function carregarDiasProvaveis() {
       provaveisDias.appendChild(pill);
     });
 
-    selecionarDiaProvaveis(chaveInicial, grupos.get(chaveInicial), grupos.get(chaveInicial)[0].data_realizacao_iso ?? chaveInicial);
+    selecionarDiaProvaveis(chaveInicial, grupos.get(chaveInicial), dataSeguraDoDia(chaveInicial));
   } catch (err) {
     provaveisLista.appendChild(linhaVazia(`Não foi possível carregar os dias: ${err.message}`));
   }
@@ -1429,7 +1442,7 @@ function montarTextoInformacoesTime(time, quantidade, forma, jogosFuturos) {
     jogosFuturos.forEach((partida) => {
       const mandante = partida.time_mandante.time_id === time.time_id;
       const adversario = mandante ? partida.time_visitante.nome_popular : partida.time_mandante.nome_popular;
-      linhas.push(`- ${formatarDataCurta(partida.data_realizacao_iso)} ${mandante ? 'vs' : '@'} ${adversario}`);
+      linhas.push(`- ${formatarDataCurta(dataSeguraDoDia(partida.data_realizacao))} ${mandante ? 'vs' : '@'} ${adversario}`);
     });
     linhas.push('');
   }
@@ -1540,7 +1553,7 @@ function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
     const adversario = mandante ? partida.time_visitante.nome_popular : partida.time_mandante.nome_popular;
     secao.appendChild(
       criarLinhaJogoTime({
-        data: partida.data_realizacao_iso,
+        data: dataSeguraDoDia(partida.data_realizacao),
         adversario,
         mandante,
         situacaoTexto: 'AGENDADA',
@@ -2383,7 +2396,7 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
   }
 
   diasChaves.forEach((chave) => {
-    const dataIso = grupos.get(chave)[0].data_realizacao_iso ?? chave;
+    const dataIso = dataSeguraDoDia(chave);
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'data-pill';
@@ -2966,7 +2979,7 @@ jogosSelecionarBtn?.addEventListener('click', () => {
       criadoEm: new Date().toISOString(),
       pernas: pernas.map((p) => ({
         partidaId: p.partida.partida_id,
-        data: p.partida.data_realizacao_iso ?? p.partida.data_realizacao,
+        data: dataSeguraDoDia(p.partida.data_realizacao) ?? p.partida.data_realizacao_iso,
         mandante: { id: p.partida.time_mandante.time_id, nome: p.partida.time_mandante.nome_popular },
         visitante: { id: p.partida.time_visitante.time_id, nome: p.partida.time_visitante.nome_popular },
         resultado: p.resultado,
