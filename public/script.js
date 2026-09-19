@@ -1531,6 +1531,8 @@ async function buscarProximosJogos(campeonatoId, numeroRodadaAtual, timeId, maxi
   return jogos;
 }
 
+let filtroMandoJogosTime = { timeId: null, valor: 'todos' };
+
 function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
   const secao = document.createElement('div');
   secao.className = 'resumo-secao';
@@ -1548,11 +1550,12 @@ function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
   // fácil de retomar de onde parou.
   const voltarParaPerfil = () => abrirPerfilTime(linhaTabela);
 
-  jogosFuturos.forEach((partida) => {
+  const linhasFuturas = jogosFuturos.map((partida) => {
     const mandante = partida.time_mandante.time_id === timeId;
     const adversario = mandante ? partida.time_visitante.nome_popular : partida.time_mandante.nome_popular;
-    secao.appendChild(
-      criarLinhaJogoTime({
+    return {
+      mandante,
+      elemento: criarLinhaJogoTime({
         data: dataSeguraDoDia(partida.data_realizacao),
         adversario,
         mandante,
@@ -1560,22 +1563,73 @@ function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
         situacaoClasse: '',
         aoClicar: () => abrirFormaPreJogo(partida).then(() => configurarVoltar(voltarParaPerfil)),
       }),
-    );
+    };
   });
 
-  jogosPassados.forEach((jogo) => {
-    secao.appendChild(
-      criarLinhaJogoTime({
-        data: jogo.data,
-        adversario: jogo.adversario,
-        mandante: jogo.mandante,
-        situacaoTexto: jogo.placar,
-        situacaoClasse: 'encerrada',
-        aoClicar: () => abrirResumo(jogo.partidaId).then(() => configurarVoltar(voltarParaPerfil)),
-      }),
-    );
+  const linhasPassadas = jogosPassados.map((jogo) => ({
+    mandante: jogo.mandante,
+    elemento: criarLinhaJogoTime({
+      data: jogo.data,
+      adversario: jogo.adversario,
+      mandante: jogo.mandante,
+      situacaoTexto: jogo.placar,
+      situacaoClasse: 'encerrada',
+      aoClicar: () => abrirResumo(jogo.partidaId).then(() => configurarVoltar(voltarParaPerfil)),
+    }),
+  }));
+
+  const todasLinhas = [...linhasFuturas, ...linhasPassadas];
+
+  // Filtra só os jogos que já estão carregados (nenhuma chamada nova de
+  // API) - lembra a escolha ao voltar de um jogo pro mesmo perfil, mas volta
+  // pra "Todos" ao abrir o perfil de outro time.
+  if (filtroMandoJogosTime.timeId !== timeId) filtroMandoJogosTime = { timeId, valor: 'todos' };
+
+  const opcoes = [
+    { valor: 'todos', rotulo: 'Todos', total: todasLinhas.length },
+    { valor: 'casa', rotulo: 'Em casa', total: todasLinhas.filter((l) => l.mandante).length },
+    { valor: 'fora', rotulo: 'Fora', total: todasLinhas.filter((l) => !l.mandante).length },
+  ];
+
+  const segmento = document.createElement('div');
+  segmento.className = 'segmento';
+  segmento.setAttribute('role', 'tablist');
+  secao.appendChild(segmento);
+
+  const lista = document.createElement('div');
+  secao.appendChild(lista);
+
+  function renderLista() {
+    const { valor } = filtroMandoJogosTime;
+    lista.replaceChildren();
+    const visiveis = todasLinhas.filter((l) => valor === 'todos' || (valor === 'casa' ? l.mandante : !l.mandante));
+    if (visiveis.length === 0) {
+      lista.appendChild(linhaVazia(valor === 'casa' ? 'Nenhum jogo em casa nesse período.' : 'Nenhum jogo fora nesse período.'));
+    } else {
+      visiveis.forEach((l) => lista.appendChild(l.elemento));
+    }
+    segmento.querySelectorAll('.segmento-btn').forEach((btn) => {
+      const ativo = btn.dataset.valor === valor;
+      btn.classList.toggle('active', ativo);
+      btn.setAttribute('aria-selected', String(ativo));
+    });
+  }
+
+  opcoes.forEach(({ valor, rotulo, total }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'segmento-btn';
+    btn.dataset.valor = valor;
+    btn.setAttribute('role', 'tab');
+    btn.textContent = `${rotulo} (${total})`;
+    btn.addEventListener('click', () => {
+      filtroMandoJogosTime = { timeId, valor };
+      renderLista();
+    });
+    segmento.appendChild(btn);
   });
 
+  renderLista();
   return secao;
 }
 
