@@ -4,7 +4,10 @@ dotenv.config({ quiet: true });
 
 export const PORT = process.env.PORT || 3000;
 export const API_FUTEBOL_KEY = process.env.API_FUTEBOL_KEY;
-export const API_FUTEBOL_BASE_URL = 'https://api.api-futebol.com.br/v1';
+// Sobrescrevível só pra testar (ver scripts/testar-reserva-cota.js, que
+// aponta pra um servidor local simulando "cota esgotada") - em uso normal
+// nunca é definida e vale a URL real.
+export const API_FUTEBOL_BASE_URL = process.env.API_FUTEBOL_BASE_URL || 'https://api.api-futebol.com.br/v1';
 // Fonte alternativa só pra escanteios/cartões amarelos (ver goalApiService.js)
 // - a API Futebol mostrou contagem errada nesses dois campos especificamente
 // (validado manualmente contra Sofascore/ge.globo). Opcional: sem a chave, o

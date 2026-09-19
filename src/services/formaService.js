@@ -2,6 +2,7 @@ import { getRodada, getPartida } from './apiFutebolService.js';
 import {
   buscarEstatisticasPartida,
   buscarTodasFixturesSerieA,
+  buscarTodasFixturesSerieB,
   buscarEstatisticasFixtureSerieA,
   CAMPEONATO_SERIE_A_ID,
 } from './goalApiService.js';
@@ -32,41 +33,94 @@ export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantid
 
   return comCache(
     chave,
-    (dados) => (dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60),
+    // Resultado vindo da reserva (GOAL API) dura pouco - assim que a cota da
+    // API Futebol volta, a próxima consulta já tenta a fonte principal de novo.
+    (dados) => {
+      if (dados.fonteAlternativa) return 10 * 60;
+      return dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60;
+    },
     async () => {
-      const jogosEncontrados = [];
-      let numero = antesRodada - 1;
+      const temReserva = Boolean(GOAL_API_KEY && MAPEAMENTO_TIMES_GOAL_API[timeId]);
 
-      while (numero >= 1 && jogosEncontrados.length < quantidade) {
-        const rodada = await getRodada(campeonatoId, numero);
-        const partidaDoTime = (rodada.partidas ?? []).find((p) => {
-          if (p.status !== 'finalizado') return false;
-          const ehMandante = p.time_mandante.time_id === timeId;
-          const ehVisitante = p.time_visitante.time_id === timeId;
-          if (!ehMandante && !ehVisitante) return false;
-          if (apenasComoMandante === true && !ehMandante) return false;
-          if (apenasComoMandante === false && !ehVisitante) return false;
-          return true;
-        });
-        if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
-        numero -= 1;
+      // Cota já estourou há pouco: nem tenta a API Futebol de novo (cada
+      // tentativa falha também conta como requisição) - vai direto pra reserva.
+      if (temReserva && Date.now() < cotaApiFutebolEsgotadaAte) {
+        return formaViaGoalApiSerieB(timeId, antesRodada, quantidade, apenasComoMandante);
       }
 
-      const resultados = await Promise.allSettled(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
-      const jogos = await Promise.all(
-        resultados
-          .filter((r) => r.status === 'fulfilled')
-          .map((r) => corrigirComGoalApi(montarLinhaForma(r.value, timeId), r.value, timeId)),
-      );
-
-      return {
-        jogos,
-        medias: calcularMedias(jogos),
-        jogosTentados: jogosEncontrados.length,
-        jogosObtidos: jogos.length,
-      };
+      try {
+        return await formaViaApiFutebol(campeonatoId, timeId, antesRodada, quantidade, apenasComoMandante, temReserva);
+      } catch (err) {
+        if (!temReserva || !ehErroDeCota(err)) throw err;
+        cotaApiFutebolEsgotadaAte = Date.now() + PAUSA_APOS_COTA_ESGOTADA_MS;
+        console.warn(`[forma] Cota da API Futebol esgotada - usando GOAL API como reserva (time ${timeId})`);
+        return formaViaGoalApiSerieB(timeId, antesRodada, quantidade, apenasComoMandante);
+      }
     },
   );
+}
+
+async function formaViaApiFutebol(campeonatoId, timeId, antesRodada, quantidade, apenasComoMandante, temReserva) {
+  const jogosEncontrados = [];
+  let numero = antesRodada - 1;
+
+  while (numero >= 1 && jogosEncontrados.length < quantidade) {
+    const rodada = await getRodada(campeonatoId, numero);
+    const partidaDoTime = (rodada.partidas ?? []).find((p) => {
+      if (p.status !== 'finalizado') return false;
+      const ehMandante = p.time_mandante.time_id === timeId;
+      const ehVisitante = p.time_visitante.time_id === timeId;
+      if (!ehMandante && !ehVisitante) return false;
+      if (apenasComoMandante === true && !ehMandante) return false;
+      if (apenasComoMandante === false && !ehVisitante) return false;
+      return true;
+    });
+    if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
+    numero -= 1;
+  }
+
+  const resultados = await Promise.allSettled(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
+
+  // A cota acabou no meio dos detalhes: com reserva disponível, é melhor
+  // refazer tudo pela GOAL API (histórico completo e consistente) do que
+  // devolver só os poucos jogos que deu tempo de buscar.
+  const rejeitadaPorCota = resultados.find((r) => r.status === 'rejected' && ehErroDeCota(r.reason));
+  if (temReserva && rejeitadaPorCota) throw rejeitadaPorCota.reason;
+
+  const jogos = await Promise.all(
+    resultados
+      .filter((r) => r.status === 'fulfilled')
+      .map((r) => corrigirComGoalApi(montarLinhaForma(r.value, timeId), r.value, timeId)),
+  );
+
+  return {
+    jogos,
+    medias: calcularMedias(jogos),
+    jogosTentados: jogosEncontrados.length,
+    jogosObtidos: jogos.length,
+  };
+}
+
+// --- Reserva da Série B: cota da API Futebol esgotada ---
+//
+// A API Futebol tem limite de 100 req/dia (429 quando estoura); a GOAL API
+// tem a Série B inteira (mesmas rodadas) e cota 10x maior, então assume o
+// histórico do time nesse caso. O time_id continua sendo o da API Futebol (o
+// resto do app e o frontend só conhecem esse) - o id da GOAL API sai do
+// mapeamento fixo, nunca de nome. Time sem mapeamento ou sem GOAL_API_KEY: o
+// erro de cota original segue pra tela, como antes.
+let cotaApiFutebolEsgotadaAte = 0;
+const PAUSA_APOS_COTA_ESGOTADA_MS = 30 * 60 * 1000;
+
+function ehErroDeCota(err) {
+  const mensagem = String(err?.response?.data?.message ?? err?.message ?? '');
+  return err?.response?.status === 429 || /limite di[aá]rio/i.test(mensagem);
+}
+
+async function formaViaGoalApiSerieB(timeId, antesRodada, quantidade, apenasComoMandante) {
+  const todas = await buscarTodasFixturesSerieB();
+  const forma = await montarFormaViaFixtures(todas, MAPEAMENTO_TIMES_GOAL_API[timeId], antesRodada, quantidade, apenasComoMandante);
+  return { ...forma, fonteAlternativa: 'goal-api' };
 }
 
 // Prioriza o histórico específico de mando de campo (só jogos em casa pro
@@ -99,61 +153,65 @@ async function buscarFormaTimeSerieA(timeId, antesRodada, quantidade, apenasComo
   return comCache(
     chave,
     (dados) => (dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60),
-    async () => {
-      const todas = await buscarTodasFixturesSerieA();
-      const jogosDoTime = todas.filter((f) => f.homeTeamId === timeId || f.awayTeamId === timeId);
-      const numeroAlvo = Number(antesRodada);
-
-      // "antesRodada" é um NÚMERO de rodada, mas rodadas podem ser jogadas
-      // fora de ordem cronológica quando um confronto é adiado - visto de
-      // verdade: a 21ª rodada do Botafogo RJ ficou agendada pra 16/09,
-      // enquanto as rodadas 22 a 27 dele já tinham sido disputadas entre
-      // agosto e 12/09. Comparar só o número da rodada (`matchRound <
-      // antesRodada`) fazia esses jogos já encerrados sumirem do
-      // histórico por engano, mesmo tendo acontecido antes na realidade.
-      //
-      // apenasComoMandante !== null identifica quem chama: buscarFormaComMando
-      // (comparativo pré-jogo) e gerarPalpites sempre passam true/false - aí
-      // "antesRodada" é a rodada do confronto específico sendo analisado, e o
-      // corte certo é a data real do próprio jogo desse time nessa rodada.
-      // Já apenasComoMandante === null é o perfil de time (buscarFormaTime
-      // puro, sem filtro de mando) - a intenção ali é "forma recente até
-      // hoje", então usa a data atual direto, sem depender de rodada nenhuma.
-      let dataCorte;
-      if (apenasComoMandante === null) {
-        dataCorte = Date.now();
-      } else {
-        const fixtureReferencia = jogosDoTime.find((f) => Number(f.matchRound) === numeroAlvo);
-        dataCorte = fixtureReferencia ? new Date(fixtureReferencia.kickoffUtc).getTime() : Date.now();
-      }
-
-      const candidatos = jogosDoTime
-        .filter((f) => f.matchStatus === 'FINISHED' && new Date(f.kickoffUtc).getTime() < dataCorte)
-        .filter((f) => {
-          const ehMandante = f.homeTeamId === timeId;
-          if (apenasComoMandante === true && !ehMandante) return false;
-          if (apenasComoMandante === false && ehMandante) return false;
-          return true;
-        })
-        .sort((a, b) => new Date(b.kickoffUtc).getTime() - new Date(a.kickoffUtc).getTime())
-        .slice(0, quantidade);
-
-      const resultados = await Promise.allSettled(
-        candidatos.map(async (fixture) => {
-          const stats = await buscarEstatisticasFixtureSerieA(fixture.id);
-          return montarLinhaFormaSerieA(fixture, stats, timeId);
-        }),
-      );
-      const jogos = resultados.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-
-      return {
-        jogos,
-        medias: calcularMedias(jogos),
-        jogosTentados: candidatos.length,
-        jogosObtidos: jogos.length,
-      };
-    },
+    async () => montarFormaViaFixtures(await buscarTodasFixturesSerieA(), timeId, antesRodada, quantidade, apenasComoMandante),
   );
+}
+
+// Nucleo compartilhado (Serie A nativa e reserva da Serie B): monta a forma
+// de um time a partir da lista de fixtures da GOAL API. timeId aqui e SEMPRE
+// o id da GOAL API.
+async function montarFormaViaFixtures(todas, timeId, antesRodada, quantidade, apenasComoMandante) {
+  const jogosDoTime = todas.filter((f) => f.homeTeamId === timeId || f.awayTeamId === timeId);
+  const numeroAlvo = Number(antesRodada);
+
+  // "antesRodada" é um NÚMERO de rodada, mas rodadas podem ser jogadas
+  // fora de ordem cronológica quando um confronto é adiado - visto de
+  // verdade: a 21ª rodada do Botafogo RJ ficou agendada pra 16/09,
+  // enquanto as rodadas 22 a 27 dele já tinham sido disputadas entre
+  // agosto e 12/09. Comparar só o número da rodada (`matchRound <
+  // antesRodada`) fazia esses jogos já encerrados sumirem do
+  // histórico por engano, mesmo tendo acontecido antes na realidade.
+  //
+  // apenasComoMandante !== null identifica quem chama: buscarFormaComMando
+  // (comparativo pré-jogo) e gerarPalpites sempre passam true/false - aí
+  // "antesRodada" é a rodada do confronto específico sendo analisado, e o
+  // corte certo é a data real do próprio jogo desse time nessa rodada.
+  // Já apenasComoMandante === null é o perfil de time (buscarFormaTime
+  // puro, sem filtro de mando) - a intenção ali é "forma recente até
+  // hoje", então usa a data atual direto, sem depender de rodada nenhuma.
+  let dataCorte;
+  if (apenasComoMandante === null) {
+    dataCorte = Date.now();
+  } else {
+    const fixtureReferencia = jogosDoTime.find((f) => Number(f.matchRound) === numeroAlvo);
+    dataCorte = fixtureReferencia ? new Date(fixtureReferencia.kickoffUtc).getTime() : Date.now();
+  }
+
+  const candidatos = jogosDoTime
+    .filter((f) => f.matchStatus === 'FINISHED' && new Date(f.kickoffUtc).getTime() < dataCorte)
+    .filter((f) => {
+      const ehMandante = f.homeTeamId === timeId;
+      if (apenasComoMandante === true && !ehMandante) return false;
+      if (apenasComoMandante === false && ehMandante) return false;
+      return true;
+    })
+    .sort((a, b) => new Date(b.kickoffUtc).getTime() - new Date(a.kickoffUtc).getTime())
+    .slice(0, quantidade);
+
+  const resultados = await Promise.allSettled(
+    candidatos.map(async (fixture) => {
+      const stats = await buscarEstatisticasFixtureSerieA(fixture.id);
+      return montarLinhaFormaSerieA(fixture, stats, timeId);
+    }),
+  );
+  const jogos = resultados.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+
+  return {
+    jogos,
+    medias: calcularMedias(jogos),
+    jogosTentados: candidatos.length,
+    jogosObtidos: jogos.length,
+  };
 }
 
 function montarLinhaFormaSerieA(fixture, stats, timeId) {

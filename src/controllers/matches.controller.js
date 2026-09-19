@@ -1,5 +1,5 @@
 import { getAoVivo, getPartida } from '../services/apiFutebolService.js';
-import { buscarResumoPartidaSerieA, buscarTodasFixturesSerieA } from '../services/goalApiService.js';
+import { buscarResumoPartidaGoal, buscarFixtureGoalPorId } from '../services/goalApiService.js';
 
 // partida_id é numérico na API Futebol; fixture id da Série A (GOAL API) é
 // uma string cuid tipo "cmr7ben..." - mesma distinção usada em
@@ -26,9 +26,9 @@ export async function resultado(req, res, next) {
     const { id } = req.params;
 
     if (ehIdSerieA(id)) {
-      const todas = await buscarTodasFixturesSerieA();
-      const fixture = todas.find((f) => f.id === id);
-      if (!fixture) return res.status(404).json({ error: 'Jogo não encontrado' });
+      const encontrado = await buscarFixtureGoalPorId(id);
+      if (!encontrado) return res.status(404).json({ error: 'Jogo não encontrado' });
+      const { fixture } = encontrado;
       return res.json({
         status: fixture.matchStatus === 'FINISHED' ? 'finalizado' : fixture.matchStatus === 'SCHEDULED' ? 'agendado' : 'andamento',
         placarMandante: fixture.homeTeamScore != null ? Number(fixture.homeTeamScore) : null,
@@ -52,7 +52,7 @@ export async function getSummary(req, res, next) {
     const { id } = req.params;
 
     if (ehIdSerieA(id)) {
-      const resumo = await buscarResumoPartidaSerieA(id);
+      const resumo = await buscarResumoPartidaGoal(id);
       return res.json(resumo);
     }
 

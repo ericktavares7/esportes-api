@@ -72,7 +72,7 @@ export async function buscarEstatisticasPartida(goalTimeIdCasa, goalTimeIdFora, 
 // Estatísticas completas (escanteios, cartões, finalizações, chutes no gol,
 // faltas, impedimentos, posse, defesas, passes) de um fixture específico da
 // Série A. Usado tanto pro "forma" de um time (buscarFormaTimeSerieA) quanto
-// pro resumo de um jogo específico (buscarResumoPartidaSerieA) - diferente
+// pro resumo de um jogo específico (buscarResumoPartidaGoal) - diferente
 // de buscarEstatisticasPartida (que existe porque parte de um time_id de
 // OUTRA fonte, a API Futebol, e por isso precisa achar o jogo por data),
 // aqui o id do fixture já vem diretamente da lista de fixtures da própria
@@ -153,10 +153,10 @@ export async function buscarEstatisticasFixtureSerieA(fixtureId) {
 // os arrays vazios (não dá pra listar quem tomou), e a seção de
 // estatísticas usa os campos *Vermelho*/desarmes* = null em vez de 0 -
 // public/script.js trata isso como "não disponível", não "zero confirmado".
-export async function buscarResumoPartidaSerieA(fixtureId) {
-  const todas = await buscarTodasFixturesSerieA();
-  const fixture = todas.find((f) => f.id === fixtureId);
-  if (!fixture) throw new Error(`Fixture ${fixtureId} não encontrado na Série A`);
+export async function buscarResumoPartidaGoal(fixtureId) {
+  const encontrado = await buscarFixtureGoalPorId(fixtureId);
+  if (!encontrado) throw new Error(`Fixture ${fixtureId} não encontrado na GOAL API (Série A/B)`);
+  const { fixture, campeonato } = encontrado;
 
   const [eventos, lineups, stats] = await Promise.all([
     comCache(`goalapi:eventos:${fixtureId}`, UM_ANO, () => chamar(`/fixtures/${fixtureId}/events`), 'goal-api'),
@@ -198,7 +198,7 @@ export async function buscarResumoPartidaSerieA(fixtureId) {
       data: fixture.kickoffUtc,
       status: mapearStatusPartida(fixture.matchStatus),
       estadio: fixture.matchStadium ?? null,
-      campeonato: 'Campeonato Brasileiro Série A',
+      campeonato,
       rodada: fixture.matchRound ? `${fixture.matchRound}ª Rodada` : null,
     },
     confronto: {
@@ -256,6 +256,7 @@ export async function buscarResumoPartidaSerieA(fixtureId) {
 // time da própria GOAL API - uma string tipo "cmr7ben..." (cuid), não um
 // número como na API Futebol.
 const LIGA_SERIE_A_ID = 'cmr77dvww00bfrx061thkr8z4';
+const LIGA_SERIE_B_ID = 'cmr77dvww00bgrx06cb9fmnv0';
 const TEMPORADA_SERIE_A = '2026';
 export const CAMPEONATO_SERIE_A_ID = 'goal-serie-a';
 
@@ -264,12 +265,12 @@ export const CAMPEONATO_SERIE_A_ID = 'goal-serie-a';
 // ordenada do jogo mais recente/futuro pro mais antigo, dá pra parar de
 // paginar assim que uma página trouxer jogo de outro ano - evita puxar as
 // ~1800 partidas de temporadas passadas que a gente não usa.
-export async function buscarTodasFixturesSerieA() {
-  return comCache('goalapi:fixtures:serieA:2026', 30 * 60, async () => {
+async function buscarFixturesLiga(ligaId, chaveCache) {
+  return comCache(chaveCache, 30 * 60, async () => {
     const todas = [];
     let offset = 0;
     for (let pagina = 0; pagina < 10; pagina += 1) {
-      const lote = await chamar(`/leagues/${LIGA_SERIE_A_ID}/fixtures?limit=100&offset=${offset}`);
+      const lote = await chamar(`/leagues/${ligaId}/fixtures?limit=100&offset=${offset}`);
       const daTemporada = lote.filter((f) => f.leagueYear === TEMPORADA_SERIE_A);
       todas.push(...daTemporada);
       if (daTemporada.length < lote.length || lote.length < 100) break;
@@ -277,6 +278,29 @@ export async function buscarTodasFixturesSerieA() {
     }
     return todas;
   }, 'goal-api');
+}
+
+export async function buscarTodasFixturesSerieA() {
+  return buscarFixturesLiga(LIGA_SERIE_A_ID, 'goalapi:fixtures:serieA:2026');
+}
+
+// Série B pela GOAL API - NÃO é a fonte principal dessa liga (é a API
+// Futebol); só entra como reserva quando a cota diária da API Futebol
+// esgota (ver buscarFormaTime em formaService.js). Mesma estrutura de
+// fixtures da Série A (380 jogos, 38 rodadas em 2026).
+export async function buscarTodasFixturesSerieB() {
+  return buscarFixturesLiga(LIGA_SERIE_B_ID, 'goalapi:fixtures:serieB:2026');
+}
+
+// Um id de fixture da GOAL API (string cuid) pode ser da Série A ou da B (a
+// B só aparece via reserva de cota) - procura nas duas listas, já em cache.
+export async function buscarFixtureGoalPorId(fixtureId) {
+  const [serieA, serieB] = await Promise.all([buscarTodasFixturesSerieA(), buscarTodasFixturesSerieB().catch(() => [])]);
+  const daA = serieA.find((f) => f.id === fixtureId);
+  if (daA) return { fixture: daA, campeonato: 'Campeonato Brasileiro Série A' };
+  const daB = serieB.find((f) => f.id === fixtureId);
+  if (daB) return { fixture: daB, campeonato: 'Campeonato Brasileiro Série B' };
+  return null;
 }
 
 function mapearStatusPartida(matchStatus) {

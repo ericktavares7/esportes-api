@@ -953,6 +953,10 @@ async function abrirFormaPreJogo(partida) {
   modalContent.appendChild(linhaResultados(`${partida.time_mandante.nome_popular} (casa)`, formaMandante.jogos));
   modalContent.appendChild(linhaResultados(`${partida.time_visitante.nome_popular} (fora)`, formaVisitante.jogos));
 
+  if (formaMandante.fonteAlternativa || formaVisitante.fonteAlternativa) {
+    modalContent.appendChild(avisoFonteAlternativa());
+  }
+
   const avisosMando = [];
   if (formaMandante.mandoEspecifico === false) {
     avisosMando.push(`${partida.time_mandante.nome_popular} não tem jogos em casa suficientes nesse recorte - usando o histórico geral (casa + fora) até acumular mais.`);
@@ -1399,6 +1403,7 @@ async function abrirPerfilTime(linhaTabela) {
   }
 
   tagsRow.appendChild(tagContexto(linhaTabela, forma.medias));
+  if (forma.fonteAlternativa) modalContent.appendChild(avisoFonteAlternativa());
 
   modalContent.appendChild(linhaResultados(time.nome_popular, forma.jogos));
 
@@ -1978,6 +1983,13 @@ function linhaVazia(texto) {
   p.className = 'vazio';
   p.textContent = texto;
   return p;
+}
+
+// Aparece quando o histórico do time veio da GOAL API porque a cota diária
+// da API Futebol acabou (ver formaService.js) - a GOAL API às vezes não traz
+// cartões de um jogo, e sem o dado ele entra como 0 nas médias.
+function avisoFonteAlternativa() {
+  return linhaVazia('Cota diária da API Futebol esgotada - histórico calculado pela GOAL API (em alguns jogos os cartões podem vir incompletos).');
 }
 
 function parsePercentual(valor) {

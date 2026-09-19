@@ -7,7 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pastaDados = path.join(__dirname, '..', '..', 'data');
 fs.mkdirSync(pastaDados, { recursive: true });
 
-const db = new DatabaseSync(path.join(pastaDados, 'cache.sqlite'));
+// CACHE_DB_PATH só existe pra testes isolados usarem um banco vazio (senão o
+// cache real mascara chamadas de rede que o teste quer exercitar).
+const db = new DatabaseSync(process.env.CACHE_DB_PATH || path.join(pastaDados, 'cache.sqlite'));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS cache (
