@@ -73,8 +73,11 @@ export const ALERTA_CATEGORIAS = [
 export function calcularAlertas(jogos, medias) {
   return ALERTA_CATEGORIAS.map(([label, campo, campoMedia, sufixo]) => {
     const linha = Math.floor(medias[campoMedia]) + 0.5;
-    const acima = jogos.filter((jogo) => jogo[campo] > linha).length;
-    const percentual = Math.round((acima / jogos.length) * 100);
+    // Só conta os jogos em que a fonte trouxe essa estatística (null = sem
+    // dado, ver montarLinhaForma em formaService.js).
+    const comDado = jogos.filter((jogo) => jogo[campo] != null);
+    const acima = comDado.filter((jogo) => jogo[campo] > linha).length;
+    const percentual = comDado.length > 0 ? Math.round((acima / comDado.length) * 100) : 0;
     return { label, linha, percentual, sufixo };
   });
 }

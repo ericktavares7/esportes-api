@@ -1,17 +1,16 @@
-// Script isolado pra validar a extensão do comparativo pré-jogo/perfil de
-// time pra Série A (fonte GOAL API) antes de confiar na UI - mesmo padrão do
-// testar-motor-palpites.js, mas usando o adaptador buscarFormaTimeSerieA
-// (dentro de formaService.js) em vez do caminho da API Futebol.
-// Uso: node scripts/testar-comparativo-serie-a.js
+// Script isolado pra validar comparativo pré-jogo / forma / motor de palpites
+// contra jogos reais (GOAL API) sem passar pela interface.
+// Uso: node scripts/testar-comparativo.js                 (Série B)
+//      CAMPEONATO_TESTE=goal-serie-a node scripts/testar-comparativo.js
+//
+// Acha a próxima rodada com jogos agendados e roda o motor pros primeiros
+// confrontos dela, imprimindo o histórico jogo a jogo que ele usou.
 
-import {
-  CAMPEONATO_SERIE_A_ID,
-  buscarCampeonatoInfoSerieA,
-  buscarRodadaSerieA,
-} from '../src/services/goalApiService.js';
+import { buscarCampeonatoInfo, buscarRodada, CAMPEONATO_SERIE_B_ID } from '../src/services/goalApiService.js';
 import { buscarFormaTime } from '../src/services/formaService.js';
 import { gerarPalpites } from '../src/services/motorPalpites.js';
 
+const CAMPEONATO_ID = process.env.CAMPEONATO_TESTE ?? CAMPEONATO_SERIE_B_ID;
 const MAX_CONFRONTOS = 3;
 const JOGOS_JANELA = 7; // mesmo valor usado dentro do motor - só pra reexibir os jogos que ele usou
 
@@ -29,16 +28,16 @@ function imprimirJogos(nomeTime, mando, jogos) {
 }
 
 async function main() {
-  const info = await buscarCampeonatoInfoSerieA();
+  const info = await buscarCampeonatoInfo(CAMPEONATO_ID);
   if (!info?.rodada_atual) {
-    console.error('Não achei rodada_atual pra Série A.');
+    console.error('Não achei rodada_atual pra esse campeonato.');
     process.exit(1);
   }
 
-  let rodada = await buscarRodadaSerieA(info.rodada_atual.rodada);
+  let rodada = await buscarRodada(CAMPEONATO_ID, info.rodada_atual.rodada);
   let tentativas = 0;
   while (rodada.proxima_rodada && (rodada.partidas ?? []).every((p) => p.status !== 'agendado') && tentativas < 5) {
-    rodada = await buscarRodadaSerieA(rodada.proxima_rodada.rodada);
+    rodada = await buscarRodada(CAMPEONATO_ID, rodada.proxima_rodada.rodada);
     tentativas += 1;
   }
 
@@ -49,7 +48,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Rodada usada: ${rodada.nome} (nº ${rodada.rodada})`);
+  console.log(`${info.nome_popular} - ${rodada.nome}`);
   console.log(`Testando ${candidatos.length} confronto(s):\n`);
 
   for (const partida of candidatos) {
@@ -59,14 +58,14 @@ async function main() {
 
     try {
       const [formaMandante, formaVisitante] = await Promise.all([
-        buscarFormaTime(CAMPEONATO_SERIE_A_ID, partida.time_mandante.time_id, rodada.rodada, JOGOS_JANELA, true),
-        buscarFormaTime(CAMPEONATO_SERIE_A_ID, partida.time_visitante.time_id, rodada.rodada, JOGOS_JANELA, false),
+        buscarFormaTime(CAMPEONATO_ID, partida.time_mandante.time_id, rodada.rodada, JOGOS_JANELA, true),
+        buscarFormaTime(CAMPEONATO_ID, partida.time_visitante.time_id, rodada.rodada, JOGOS_JANELA, false),
       ]);
       imprimirJogos(partida.time_mandante.nome_popular, 'casa', formaMandante.jogos);
       imprimirJogos(partida.time_visitante.nome_popular, 'fora', formaVisitante.jogos);
 
       const resultado = await gerarPalpites(
-        CAMPEONATO_SERIE_A_ID,
+        CAMPEONATO_ID,
         partida.time_mandante.time_id,
         partida.time_visitante.time_id,
         rodada.rodada,

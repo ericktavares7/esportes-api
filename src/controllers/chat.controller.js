@@ -24,18 +24,14 @@ export async function chat(req, res, next) {
 export async function analiseAutomatica(req, res, next) {
   try {
     const { timeMandanteId, timeVisitanteId, numeroRodada, quantidade } = req.body;
-    if (
-      !Number.isFinite(Number(timeMandanteId)) ||
-      !Number.isFinite(Number(timeVisitanteId)) ||
-      !Number.isFinite(Number(numeroRodada))
-    ) {
+    if (!timeMandanteId || !timeVisitanteId || !Number.isFinite(Number(numeroRodada))) {
       return res.status(400).json({ error: 'timeMandanteId, timeVisitanteId e numeroRodada são obrigatórios.' });
     }
 
     const resultado = await analisarConfronto(
       {
-        timeMandanteId: Number(timeMandanteId),
-        timeVisitanteId: Number(timeVisitanteId),
+        timeMandanteId: String(timeMandanteId),
+        timeVisitanteId: String(timeVisitanteId),
         numeroRodada: Number(numeroRodada),
         quantidade: quantidade ? Number(quantidade) : undefined,
       },

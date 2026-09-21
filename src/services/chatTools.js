@@ -4,7 +4,7 @@
 // dados de volta. Isso garante que a resposta final venha sempre dos mesmos
 // números reais, calculados por código - o modelo só formata e explica.
 
-import { getCampeonatos, getMinhaConta, getRodada, getTabela } from './apiFutebolService.js';
+import { CAMPEONATO_SERIE_B_ID, buscarCampeonatoInfo, buscarRodada, buscarTabela } from './goalApiService.js';
 import { buscarFormaComMando } from './formaService.js';
 import { estimarProbabilidades, calcularAlertas } from './estatisticasService.js';
 
@@ -137,8 +137,8 @@ export const TOOL_DEFS = [
     parameters: {
       type: 'object',
       properties: {
-        timeMandanteId: { type: 'integer' },
-        timeVisitanteId: { type: 'integer' },
+        timeMandanteId: { type: 'string', description: 'ID do time mandante, exatamente como veio de buscar_jogos_rodada.' },
+        timeVisitanteId: { type: 'string', description: 'ID do time visitante, exatamente como veio de buscar_jogos_rodada.' },
         numeroRodada: {
           type: 'integer',
           description: 'Rodada em que o confronto acontece - o histórico busca só jogos ANTERIORES a ela.',
@@ -153,33 +153,18 @@ export const TOOL_DEFS = [
   },
 ];
 
-async function resolverCampeonatoId() {
-  const campeonatos = await getCampeonatos();
-  let liberados = campeonatos;
-  try {
-    const minhaConta = await getMinhaConta();
-    const idsLiberados = new Set(minhaConta.campeonatos.map((c) => c.campeonato_id));
-    liberados = campeonatos.filter((c) => idsLiberados.has(c.campeonato_id));
-  } catch {
-    // /me falhou - segue com o catálogo completo em vez de travar a busca do jogo
-  }
-  const serieB = liberados.find((c) => c.nome?.includes('Série B'));
-  return (serieB ?? liberados[0])?.campeonato_id;
-}
-
+// O chat sempre analisa a Série B (foi pensado pra ela - ver SYSTEM_PROMPT).
 async function buscarJogosRodada(input) {
-  const campeonatoId = await resolverCampeonatoId();
-  if (!campeonatoId) return { erro: 'Nenhum campeonato disponível no plano atual.' };
+  const campeonatoId = CAMPEONATO_SERIE_B_ID;
 
   let numero = input.numero;
   if (!numero) {
-    const campeonatos = await getCampeonatos();
-    const atual = campeonatos.find((c) => c.campeonato_id === campeonatoId);
+    const atual = await buscarCampeonatoInfo(campeonatoId);
     numero = atual?.rodada_atual?.rodada;
   }
   if (!numero) return { erro: 'Não encontrei a rodada atual (o campeonato pode ser de mata-mata).' };
 
-  const rodada = await getRodada(campeonatoId, numero);
+  const rodada = await buscarRodada(campeonatoId, numero);
   return {
     campeonatoId,
     numero: rodada.rodada,
@@ -234,13 +219,13 @@ function montarResultadoConfronto(formaMandante, formaVisitante, contextoMandant
 }
 
 export async function analisarConfronto(input, contexto) {
-  const campeonatoId = await resolverCampeonatoId();
+  const campeonatoId = CAMPEONATO_SERIE_B_ID;
   const quantidade = input.quantidade ?? contexto?.quantidadePadrao ?? 10;
 
   const [formaMandante, formaVisitante, tabela] = await Promise.all([
     buscarFormaComMando(campeonatoId, input.timeMandanteId, input.numeroRodada, quantidade, true),
     buscarFormaComMando(campeonatoId, input.timeVisitanteId, input.numeroRodada, quantidade, false),
-    getTabela(campeonatoId).catch(() => null),
+    buscarTabela(campeonatoId).catch(() => null),
   ]);
 
   const linhaMandante = tabela?.find((l) => l.time.time_id === input.timeMandanteId);

@@ -1,126 +1,35 @@
-import { getRodada, getPartida } from './apiFutebolService.js';
-import {
-  buscarEstatisticasPartida,
-  buscarTodasFixturesSerieA,
-  buscarTodasFixturesSerieB,
-  buscarEstatisticasFixtureSerieA,
-  CAMPEONATO_SERIE_A_ID,
-} from './goalApiService.js';
-import { MAPEAMENTO_TIMES_GOAL_API } from '../config/mapeamentoGoalApi.js';
-import { GOAL_API_KEY } from '../config/env.js';
+import { buscarTodasFixtures, buscarEstatisticasFixture, ehCampeonatoGoal } from './goalApiService.js';
 import { comCache } from '../db/cache.js';
 
-// Anda pelas rodadas anteriores até achar N jogos já encerrados do time,
-// depois busca o detalhe completo (com estatísticas) de cada um. O resultado
-// agregado também fica em cache - assim, reabrir o comparativo do mesmo jogo
-// não repete nem a varredura de rodadas nem as chamadas de detalhe.
+// Histórico recente de um time (últimos N jogos encerrados + médias),
+// montado a partir das fixtures da GOAL API. Como buscarTodasFixtures() já
+// traz a temporada inteira em cache (a mesma lista de Jogos/Tabela), dá pra
+// filtrar o time direto nela - sem varrer rodada por rodada. Só as
+// estatísticas de cada jogo são uma chamada por jogo (cacheada por muito
+// tempo depois que o jogo acaba).
 //
-// Se a cota acabar no meio da busca dos detalhes, aproveita os jogos que já
-// deu tempo de buscar em vez de descartar tudo (Promise.allSettled, não
-// Promise.all) - cada getPartida() que teve sucesso já ficou cacheado
-// individualmente (1 ano, já que jogo encerrado não muda mais), então uma
-// nova tentativa depois só gasta cota com o que ainda faltou. Por isso um
-// resultado incompleto pega um TTL bem mais curto (2 min em vez de 30) - a
-// próxima vez que alguém pedir essa forma, tenta completar de novo cedo.
+// Se a busca de estatísticas de algum jogo falhar, aproveita os que deram
+// certo em vez de descartar tudo (Promise.allSettled, não Promise.all) - cada
+// estatística que teve sucesso já ficou cacheada individualmente, então uma
+// nova tentativa depois só refaz o que faltou. Por isso um resultado
+// incompleto pega um TTL bem mais curto (2 min em vez de 30).
+//
 // apenasComoMandante: true = só jogos em casa, false = só jogos fora,
-// null/undefined = mistura os dois (comportamento original).
+// null/undefined = mistura os dois.
 export async function buscarFormaTime(campeonatoId, timeId, antesRodada, quantidade = 5, apenasComoMandante = null) {
-  if (campeonatoId === CAMPEONATO_SERIE_A_ID) {
-    return buscarFormaTimeSerieA(timeId, antesRodada, quantidade, apenasComoMandante);
+  if (!ehCampeonatoGoal(campeonatoId)) {
+    const err = new Error(`Campeonato "${campeonatoId}" não é suportado`);
+    err.status = 404;
+    throw err;
   }
 
   const chave = `forma:${campeonatoId}:${timeId}:${antesRodada}:${quantidade}:${apenasComoMandante}`;
 
   return comCache(
     chave,
-    // Resultado vindo da reserva (GOAL API) dura pouco - assim que a cota da
-    // API Futebol volta, a próxima consulta já tenta a fonte principal de novo.
-    (dados) => {
-      if (dados.fonteAlternativa) return 10 * 60;
-      return dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60;
-    },
-    async () => {
-      const temReserva = Boolean(GOAL_API_KEY && MAPEAMENTO_TIMES_GOAL_API[timeId]);
-
-      // Cota já estourou há pouco: nem tenta a API Futebol de novo (cada
-      // tentativa falha também conta como requisição) - vai direto pra reserva.
-      if (temReserva && Date.now() < cotaApiFutebolEsgotadaAte) {
-        return formaViaGoalApiSerieB(timeId, antesRodada, quantidade, apenasComoMandante);
-      }
-
-      try {
-        return await formaViaApiFutebol(campeonatoId, timeId, antesRodada, quantidade, apenasComoMandante, temReserva);
-      } catch (err) {
-        if (!temReserva || !ehErroDeCota(err)) throw err;
-        cotaApiFutebolEsgotadaAte = Date.now() + PAUSA_APOS_COTA_ESGOTADA_MS;
-        console.warn(`[forma] Cota da API Futebol esgotada - usando GOAL API como reserva (time ${timeId})`);
-        return formaViaGoalApiSerieB(timeId, antesRodada, quantidade, apenasComoMandante);
-      }
-    },
+    (dados) => (dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60),
+    async () => montarFormaViaFixtures(await buscarTodasFixtures(campeonatoId), timeId, antesRodada, quantidade, apenasComoMandante),
   );
-}
-
-async function formaViaApiFutebol(campeonatoId, timeId, antesRodada, quantidade, apenasComoMandante, temReserva) {
-  const jogosEncontrados = [];
-  let numero = antesRodada - 1;
-
-  while (numero >= 1 && jogosEncontrados.length < quantidade) {
-    const rodada = await getRodada(campeonatoId, numero);
-    const partidaDoTime = (rodada.partidas ?? []).find((p) => {
-      if (p.status !== 'finalizado') return false;
-      const ehMandante = p.time_mandante.time_id === timeId;
-      const ehVisitante = p.time_visitante.time_id === timeId;
-      if (!ehMandante && !ehVisitante) return false;
-      if (apenasComoMandante === true && !ehMandante) return false;
-      if (apenasComoMandante === false && !ehVisitante) return false;
-      return true;
-    });
-    if (partidaDoTime) jogosEncontrados.push(partidaDoTime);
-    numero -= 1;
-  }
-
-  const resultados = await Promise.allSettled(jogosEncontrados.map((jogo) => getPartida(jogo.partida_id)));
-
-  // A cota acabou no meio dos detalhes: com reserva disponível, é melhor
-  // refazer tudo pela GOAL API (histórico completo e consistente) do que
-  // devolver só os poucos jogos que deu tempo de buscar.
-  const rejeitadaPorCota = resultados.find((r) => r.status === 'rejected' && ehErroDeCota(r.reason));
-  if (temReserva && rejeitadaPorCota) throw rejeitadaPorCota.reason;
-
-  const jogos = await Promise.all(
-    resultados
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => corrigirComGoalApi(montarLinhaForma(r.value, timeId), r.value, timeId)),
-  );
-
-  return {
-    jogos,
-    medias: calcularMedias(jogos),
-    jogosTentados: jogosEncontrados.length,
-    jogosObtidos: jogos.length,
-  };
-}
-
-// --- Reserva da Série B: cota da API Futebol esgotada ---
-//
-// A API Futebol tem limite de 100 req/dia (429 quando estoura); a GOAL API
-// tem a Série B inteira (mesmas rodadas) e cota 10x maior, então assume o
-// histórico do time nesse caso. O time_id continua sendo o da API Futebol (o
-// resto do app e o frontend só conhecem esse) - o id da GOAL API sai do
-// mapeamento fixo, nunca de nome. Time sem mapeamento ou sem GOAL_API_KEY: o
-// erro de cota original segue pra tela, como antes.
-let cotaApiFutebolEsgotadaAte = 0;
-const PAUSA_APOS_COTA_ESGOTADA_MS = 30 * 60 * 1000;
-
-function ehErroDeCota(err) {
-  const mensagem = String(err?.response?.data?.message ?? err?.message ?? '');
-  return err?.response?.status === 429 || /limite di[aá]rio/i.test(mensagem);
-}
-
-async function formaViaGoalApiSerieB(timeId, antesRodada, quantidade, apenasComoMandante) {
-  const todas = await buscarTodasFixturesSerieB();
-  const forma = await montarFormaViaFixtures(todas, MAPEAMENTO_TIMES_GOAL_API[timeId], antesRodada, quantidade, apenasComoMandante);
-  return { ...forma, fonteAlternativa: 'goal-api' };
 }
 
 // Prioriza o histórico específico de mando de campo (só jogos em casa pro
@@ -141,25 +50,6 @@ export async function buscarFormaComMando(campeonatoId, timeId, antesRodada, qua
   return { ...geral, mandoEspecifico: false };
 }
 
-// Equivalente do buscarFormaTime, mas pra Série A (fonte única: GOAL API,
-// sem API Futebol nesse campeonato - ver [[project-serie-a-test]]). Como
-// buscarTodasFixturesSerieA() já traz o histórico completo da temporada em
-// cache (usado por Jogos/Tabela), dá pra filtrar o time direto nele em vez
-// de repetir a varredura rodada-por-rodada que a versão da API Futebol
-// precisa fazer (lá, cada rodada é uma chamada separada).
-async function buscarFormaTimeSerieA(timeId, antesRodada, quantidade, apenasComoMandante) {
-  const chave = `forma:${CAMPEONATO_SERIE_A_ID}:${timeId}:${antesRodada}:${quantidade}:${apenasComoMandante}`;
-
-  return comCache(
-    chave,
-    (dados) => (dados.jogosObtidos < dados.jogosTentados ? 2 * 60 : 30 * 60),
-    async () => montarFormaViaFixtures(await buscarTodasFixturesSerieA(), timeId, antesRodada, quantidade, apenasComoMandante),
-  );
-}
-
-// Nucleo compartilhado (Serie A nativa e reserva da Serie B): monta a forma
-// de um time a partir da lista de fixtures da GOAL API. timeId aqui e SEMPRE
-// o id da GOAL API.
 async function montarFormaViaFixtures(todas, timeId, antesRodada, quantidade, apenasComoMandante) {
   const jogosDoTime = todas.filter((f) => f.homeTeamId === timeId || f.awayTeamId === timeId);
   const numeroAlvo = Number(antesRodada);
@@ -200,8 +90,8 @@ async function montarFormaViaFixtures(todas, timeId, antesRodada, quantidade, ap
 
   const resultados = await Promise.allSettled(
     candidatos.map(async (fixture) => {
-      const stats = await buscarEstatisticasFixtureSerieA(fixture.id);
-      return montarLinhaFormaSerieA(fixture, stats, timeId);
+      const stats = await buscarEstatisticasFixture(fixture.id, fixture.kickoffUtc);
+      return montarLinhaForma(fixture, stats, timeId);
     }),
   );
   const jogos = resultados.filter((r) => r.status === 'fulfilled').map((r) => r.value);
@@ -214,7 +104,7 @@ async function montarFormaViaFixtures(todas, timeId, antesRodada, quantidade, ap
   };
 }
 
-function montarLinhaFormaSerieA(fixture, stats, timeId) {
+function montarLinhaForma(fixture, stats, timeId) {
   const ehMandante = fixture.homeTeamId === timeId;
   const golsPro = ehMandante ? Number(fixture.homeTeamScore) : Number(fixture.awayTeamScore);
   const golsContra = ehMandante ? Number(fixture.awayTeamScore) : Number(fixture.homeTeamScore);
@@ -225,9 +115,13 @@ function montarLinhaFormaSerieA(fixture, stats, timeId) {
   if (golsPro < golsContra) resultado = 'D';
 
   // Pega o valor do lado do time (mandante/visitante) e do adversário a
-  // partir do par casa/fora que buscarEstatisticasFixtureSerieA devolve.
-  const pegar = (casa, fora) => (ehMandante ? casa : fora) ?? 0;
-  const pegarContra = (casa, fora) => (ehMandante ? fora : casa) ?? 0;
+  // partir do par casa/fora que buscarEstatisticasFixture devolve. Estatística
+  // que a fonte não trouxe nesse jogo fica null, NÃO 0: cerca de 12% dos
+  // jogos vêm sem finalizações/faltas e 14% sem cartões amarelos, e um 0
+  // falso derrubaria as médias e os mercados de over/under. Quem calcula em
+  // cima (calcularMedias, calcularAlertas, motorPalpites) ignora os null.
+  const pegar = (casa, fora) => (ehMandante ? casa : fora) ?? null;
+  const pegarContra = (casa, fora) => (ehMandante ? fora : casa) ?? null;
 
   return {
     partidaId: fixture.id,
@@ -238,6 +132,9 @@ function montarLinhaFormaSerieA(fixture, stats, timeId) {
     resultado,
     golsPro,
     golsContra,
+    // "Contra" é o que o ADVERSÁRIO fez naquela mesma partida (não é
+    // "escanteios sofridos" no sentido defensivo) - serve pra reconstruir o
+    // total real da partida (escanteios/cartões dos dois lados somados).
     escanteios: pegar(stats.escanteiosCasa, stats.escanteiosFora),
     escanteiosContra: pegarContra(stats.escanteiosCasa, stats.escanteiosFora),
     finalizacoes: pegar(stats.finalizacoesCasa, stats.finalizacoesFora),
@@ -250,93 +147,17 @@ function montarLinhaFormaSerieA(fixture, stats, timeId) {
   };
 }
 
-function montarLinhaForma(partida, timeId) {
-  const ehMandante = partida.time_mandante.time_id === timeId;
-  const stats = ehMandante ? partida.estatisticas.mandante : partida.estatisticas.visitante;
-  const statsAdversario = ehMandante ? partida.estatisticas.visitante : partida.estatisticas.mandante;
-  const golsPro = ehMandante ? partida.placar_mandante : partida.placar_visitante;
-  const golsContra = ehMandante ? partida.placar_visitante : partida.placar_mandante;
-  const adversario = ehMandante ? partida.time_visitante : partida.time_mandante;
-  const cartoesAmarelos = (ehMandante ? partida.cartoes?.amarelo?.mandante : partida.cartoes?.amarelo?.visitante) ?? [];
-  const cartoesAmarelosAdversario = (ehMandante ? partida.cartoes?.amarelo?.visitante : partida.cartoes?.amarelo?.mandante) ?? [];
-
-  let resultado = 'E';
-  if (golsPro > golsContra) resultado = 'V';
-  if (golsPro < golsContra) resultado = 'D';
-
-  return {
-    partidaId: partida.partida_id,
-    data: partida.data_realizacao_iso,
-    adversario: adversario.nome_popular,
-    mandante: ehMandante,
-    placar: `${golsPro} x ${golsContra}`,
-    resultado,
-    golsPro,
-    golsContra,
-    escanteios: stats.escanteios,
-    // "Contra" aqui é o que o ADVERSÁRIO fez naquela mesma partida (não é
-    // "escanteios sofridos" no sentido defensivo) - serve pra reconstruir o
-    // total real da partida (escanteios/cartões dos dois lados somados) sem
-    // precisar buscar o jogo de novo.
-    escanteiosContra: statsAdversario.escanteios,
-    finalizacoes: stats.finalizacao.total,
-    chutesNoGol: stats.finalizacao.no_gol,
-    faltas: stats.faltas,
-    impedimentos: stats.impedimentos,
-    cartoesAmarelos: cartoesAmarelos.length,
-    cartoesAmarelosContra: cartoesAmarelosAdversario.length,
-    posseDeBola: parseInt(stats.posse_de_bola, 10) || 0,
-  };
-}
-
-// A API Futebol mostrou contagem errada de escanteios/cartões em vários jogos
-// checados manualmente contra Sofascore/ge.globo (sempre a menos, nunca a
-// mais - sugere bug de contagem na fonte deles, não aleatório). A GOAL API
-// bateu certo nos mesmos jogos, então esses dois campos são sobrescritos por
-// ela quando os dois times do confronto estão mapeados e ela tem o dado.
-//
-// Resto do jogo (placar, escalação, rodada etc.) continua vindo só da API
-// Futebol, que se mostrou confiável nesses outros campos - a troca é
-// cirúrgica, não uma substituição de fonte inteira. Se a GOAL API falhar,
-// não tiver a chave configurada, ou o jogo não estiver nela, mantém o valor
-// da API Futebol sem quebrar nada (silenciosamente pior, não ausente).
-async function corrigirComGoalApi(linha, partida, timeId) {
-  if (!GOAL_API_KEY) return linha;
-
-  const goalIdMandante = MAPEAMENTO_TIMES_GOAL_API[partida.time_mandante.time_id];
-  const goalIdVisitante = MAPEAMENTO_TIMES_GOAL_API[partida.time_visitante.time_id];
-  if (!goalIdMandante || !goalIdVisitante) return linha;
-
-  let stats;
-  try {
-    stats = await buscarEstatisticasPartida(goalIdMandante, goalIdVisitante, partida.data_realizacao_iso);
-  } catch (err) {
-    console.warn(`[goal-api] Falha ao corrigir escanteios/cartões da partida ${partida.partida_id}: ${err.message}`);
-    return linha;
-  }
-  if (!stats) return linha;
-
-  const ehMandante = partida.time_mandante.time_id === timeId;
-  const escanteios = ehMandante ? stats.escanteiosCasa : stats.escanteiosFora;
-  const escanteiosContra = ehMandante ? stats.escanteiosFora : stats.escanteiosCasa;
-  const cartoesAmarelos = ehMandante ? stats.cartoesCasa : stats.cartoesFora;
-  const cartoesAmarelosContra = ehMandante ? stats.cartoesFora : stats.cartoesCasa;
-
-  return {
-    ...linha,
-    escanteios: escanteios ?? linha.escanteios,
-    escanteiosContra: escanteiosContra ?? linha.escanteiosContra,
-    cartoesAmarelos: cartoesAmarelos ?? linha.cartoesAmarelos,
-    cartoesAmarelosContra: cartoesAmarelosContra ?? linha.cartoesAmarelosContra,
-  };
-}
-
 function calcularMedias(jogos) {
   if (jogos.length === 0) return null;
 
   const n = jogos.length;
-  const soma = (campo) => jogos.reduce((total, jogo) => total + jogo[campo], 0);
-  const media = (campo) => Math.round((soma(campo) / n) * 10) / 10;
+  // Média só dos jogos que têm aquela estatística (ver montarLinhaForma) -
+  // gols/resultado existem em todos, o resto pode faltar em alguns.
+  const media = (campo) => {
+    const valores = jogos.map((jogo) => jogo[campo]).filter((v) => v != null);
+    if (valores.length === 0) return 0;
+    return Math.round((valores.reduce((total, v) => total + v, 0) / valores.length) * 10) / 10;
+  };
 
   const vitorias = jogos.filter((jogo) => jogo.resultado === 'V').length;
   const empates = jogos.filter((jogo) => jogo.resultado === 'E').length;

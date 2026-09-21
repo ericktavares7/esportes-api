@@ -1,17 +1,17 @@
-import { getAoVivo, getPartida } from '../services/apiFutebolService.js';
-import { buscarResumoPartidaGoal, buscarFixtureGoalPorId } from '../services/goalApiService.js';
+import { getPartida } from '../services/apiFutebolService.js';
+import { buscarAoVivo, buscarResumoPartidaGoal, buscarFixtureGoalPorId, mapearStatusPartida } from '../services/goalApiService.js';
 
-// partida_id é numérico na API Futebol; fixture id da Série A (GOAL API) é
-// uma string cuid tipo "cmr7ben..." - mesma distinção usada em
-// times.controller.js/palpites.controller.js pra decidir a fonte certa sem
-// precisar de um parâmetro "campeonato" nessa rota.
-function ehIdSerieA(id) {
+// Todo jogo do app é da GOAL API (id string cuid tipo "cmr7ben..."). Só um
+// id NUMÉRICO é da API Futebol - sobrou apenas em "Jogos pesquisados"
+// salvos antes da migração, que ainda precisam abrir/conferir o resultado.
+// Essa distinção evita precisar de um parâmetro "campeonato" nessa rota.
+function ehIdGoal(id) {
   return Number.isNaN(Number(id));
 }
 
 export async function listLive(req, res, next) {
   try {
-    const partidas = await getAoVivo();
+    const partidas = await buscarAoVivo();
     res.json(partidas);
   } catch (err) {
     next(err);
@@ -25,12 +25,12 @@ export async function resultado(req, res, next) {
   try {
     const { id } = req.params;
 
-    if (ehIdSerieA(id)) {
+    if (ehIdGoal(id)) {
       const encontrado = await buscarFixtureGoalPorId(id);
       if (!encontrado) return res.status(404).json({ error: 'Jogo não encontrado' });
       const { fixture } = encontrado;
       return res.json({
-        status: fixture.matchStatus === 'FINISHED' ? 'finalizado' : fixture.matchStatus === 'SCHEDULED' ? 'agendado' : 'andamento',
+        status: mapearStatusPartida(fixture.matchStatus),
         placarMandante: fixture.homeTeamScore != null ? Number(fixture.homeTeamScore) : null,
         placarVisitante: fixture.awayTeamScore != null ? Number(fixture.awayTeamScore) : null,
       });
@@ -51,7 +51,7 @@ export async function getSummary(req, res, next) {
   try {
     const { id } = req.params;
 
-    if (ehIdSerieA(id)) {
+    if (ehIdGoal(id)) {
       const resumo = await buscarResumoPartidaGoal(id);
       return res.json(resumo);
     }

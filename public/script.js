@@ -29,9 +29,6 @@ const acertometroEl = document.getElementById('acertometro');
 
 let rodadaExibida = null;
 
-// Precisa bater com CAMPEONATO_SERIE_A_ID em src/services/goalApiService.js -
-// usado só pra decidir qual cota mostrar no badge (API Futebol x GOAL API).
-const CAMPEONATO_SERIE_A_ID = 'goal-serie-a';
 
 async function fetchJSON(url, options) {
   const resposta = await fetch(url, options);
@@ -84,11 +81,8 @@ async function carregarUsoApi() {
   const badge = document.getElementById('uso-api-badge');
   try {
     const status = await fetchJSON('/api/status');
-    // Série A roda 100% na GOAL API (1000/dia); qualquer outro campeonato
-    // usa a API Futebol (100/dia, mais apertada) - o badge mostra a cota
-    // que de fato importa pro que está selecionado no momento.
-    const usandoSerieA = campeonatoSelect.value === CAMPEONATO_SERIE_A_ID;
-    const { hoje, limite } = usandoSerieA ? status.usoApi.goalApi : status.usoApi.apiFutebol;
+    // Todos os dados vêm da GOAL API (1000 requisições/dia).
+    const { hoje, limite } = status.usoApi.goalApi;
     const pct = hoje / limite;
     badge.textContent = `${hoje}/${limite} hoje`;
     badge.classList.toggle('uso-api-aviso', pct >= 0.5 && pct < 0.9);
@@ -294,6 +288,9 @@ function situacaoJogo(partida) {
   }
   if (partida.status === 'finalizado' || partida.status === 'encerrada') {
     return { texto: partida.placar_mandante + ' x ' + partida.placar_visitante, classe: 'encerrada' };
+  }
+  if (partida.status === 'adiado') {
+    return { texto: 'ADIADA', classe: '' };
   }
   return { texto: 'AGENDADA', classe: '' };
 }
@@ -953,10 +950,6 @@ async function abrirFormaPreJogo(partida) {
   modalContent.appendChild(linhaResultados(`${partida.time_mandante.nome_popular} (casa)`, formaMandante.jogos));
   modalContent.appendChild(linhaResultados(`${partida.time_visitante.nome_popular} (fora)`, formaVisitante.jogos));
 
-  if (formaMandante.fonteAlternativa || formaVisitante.fonteAlternativa) {
-    modalContent.appendChild(avisoFonteAlternativa());
-  }
-
   const avisosMando = [];
   if (formaMandante.mandoEspecifico === false) {
     avisosMando.push(`${partida.time_mandante.nome_popular} não tem jogos em casa suficientes nesse recorte - usando o histórico geral (casa + fora) até acumular mais.`);
@@ -1362,8 +1355,6 @@ async function abrirPerfilTime(linhaTabela) {
   const campeonatoId = campeonatoSelect.value;
   const quantidade = quantidadeSelect.value;
   const time = linhaTabela.time;
-  let forma;
-  let jogosFuturos = [];
 
   const cabecalho = document.createElement('div');
   cabecalho.className = 'resumo-placar';
@@ -1372,22 +1363,14 @@ async function abrirPerfilTime(linhaTabela) {
   nomeEl.textContent = time.nome_popular;
   const subtitulo = document.createElement('div');
   subtitulo.className = 'forma-subtitulo';
-  subtitulo.textContent = `Histórico dos últimos ${quantidade} jogos`;
+  subtitulo.textContent = `Últimos ${quantidade} jogos`;
   cabecalho.append(nomeEl, subtitulo);
   modalContent.appendChild(cabecalho);
   habilitarBaixarPdf(nomeEl.textContent);
 
-  // forma/jogosFuturos são lidos no momento do clique, não na criação do
-  // botão - por isso dá pra criar o botão já aqui em cima, antes deles
-  // terminarem de carregar.
-  modalContent.appendChild(
-    botaoCopiar((botao) => copiarTexto(botao, () => (forma ? montarTextoInformacoesTime(time, quantidade, forma, jogosFuturos) : null))),
-  );
-
-  const tagsRow = document.createElement('div');
-  tagsRow.className = 'forma-tags-linha';
-  modalContent.appendChild(tagsRow);
-
+  // O card é só a lista de jogos com o filtro Todos/Em casa/Fora - médias,
+  // top 5, chances e forma em bolinhas ficam no comparativo do confronto.
+  let forma;
   let numeroRodadaAtual;
   try {
     const campeonatos = await fetchJSON('/api/campeonatos');
@@ -1402,64 +1385,15 @@ async function abrirPerfilTime(linhaTabela) {
     return;
   }
 
-  tagsRow.appendChild(tagContexto(linhaTabela, forma.medias));
-  if (forma.fonteAlternativa) modalContent.appendChild(avisoFonteAlternativa());
-
-  modalContent.appendChild(linhaResultados(time.nome_popular, forma.jogos));
-
-  if (!forma.medias) {
-    modalContent.appendChild(linhaVazia('Sem jogos anteriores suficientes para montar o histórico.'));
-    return;
-  }
-
-  modalContent.appendChild(secaoMediasIndividuais(forma.medias));
-  modalContent.appendChild(secaoTop5(forma.jogos));
-  modalContent.appendChild(secaoAlertas(forma.jogos, forma.medias));
-
+  // Sem os próximos jogos ainda dá pra mostrar o histórico.
+  let jogosFuturos = [];
   try {
     jogosFuturos = await buscarProximosJogos(campeonatoId, numeroRodadaAtual, time.time_id);
-    modalContent.appendChild(secaoJogosTime(time.time_id, forma.jogos, jogosFuturos, linhaTabela));
   } catch (err) {
     modalContent.appendChild(linhaVazia(`Não foi possível carregar os próximos jogos: ${err.message}`));
   }
-}
 
-// Monta um texto simples (pra colar no chat, whatsapp etc) com o resumo do
-// time: médias, forma recente, próximos e últimos jogos - tudo que já
-// calculamos, sem precisar printar tela.
-function montarTextoInformacoesTime(time, quantidade, forma, jogosFuturos) {
-  const linhas = [`${time.nome_popular} - últimos ${quantidade} jogos`, ''];
-
-  if (forma.medias) {
-    LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
-      linhas.push(`${label}: ${forma.medias[campo]}${sufixo}`);
-    });
-    linhas.push('');
-  }
-
-  if (forma.jogos?.length) {
-    linhas.push(`Forma recente (mais recente primeiro): ${forma.jogos.map((j) => j.resultado).join(', ')}`);
-    linhas.push('');
-  }
-
-  if (jogosFuturos.length > 0) {
-    linhas.push('Próximos jogos:');
-    jogosFuturos.forEach((partida) => {
-      const mandante = partida.time_mandante.time_id === time.time_id;
-      const adversario = mandante ? partida.time_visitante.nome_popular : partida.time_mandante.nome_popular;
-      linhas.push(`- ${formatarDataCurta(dataSeguraDoDia(partida.data_realizacao))} ${mandante ? 'vs' : '@'} ${adversario}`);
-    });
-    linhas.push('');
-  }
-
-  if (forma.jogos?.length) {
-    linhas.push('Últimos jogos:');
-    forma.jogos.forEach((jogo) => {
-      linhas.push(`- ${formatarDataCurta(jogo.data)} ${jogo.mandante ? 'vs' : '@'} ${jogo.adversario}: ${jogo.placar}`);
-    });
-  }
-
-  return linhas.join('\n').trim();
+  modalContent.appendChild(secaoJogosTime(time.time_id, forma.jogos, jogosFuturos, linhaTabela));
 }
 
 // Botão de copiar genérico - `montarTexto` só é chamado no clique (não na
@@ -1541,9 +1475,6 @@ let filtroMandoJogosTime = { timeId: null, valor: 'todos' };
 function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
   const secao = document.createElement('div');
   secao.className = 'resumo-secao';
-  const titulo = document.createElement('h3');
-  titulo.textContent = 'Jogos';
-  secao.appendChild(titulo);
 
   if (jogosFuturos.length === 0 && jogosPassados.length === 0) {
     secao.appendChild(linhaVazia('Nenhum jogo encontrado pra esse time.'));
@@ -1578,7 +1509,9 @@ function secaoJogosTime(timeId, jogosPassados, jogosFuturos, linhaTabela) {
       adversario: jogo.adversario,
       mandante: jogo.mandante,
       situacaoTexto: jogo.placar,
-      situacaoClasse: 'encerrada',
+      // O placar já vem do ponto de vista desse time (gols dele primeiro),
+      // então a cor mostra a forma de relance: verde vitória, vermelho derrota.
+      situacaoClasse: `encerrada ${{ V: 'vitoria', D: 'derrota' }[jogo.resultado] ?? 'empate'}`,
       aoClicar: () => abrirResumo(jogo.partidaId).then(() => configurarVoltar(voltarParaPerfil)),
     }),
   }));
@@ -1724,6 +1657,7 @@ function secaoTop5(jogos) {
     const lista = document.createElement('ol');
     lista.className = 'top5-lista';
     [...jogos]
+      .filter((jogo) => jogo[campo] != null)
       .sort((a, b) => b[campo] - a[campo])
       .slice(0, 5)
       .forEach((jogo) => {
@@ -1764,40 +1698,12 @@ const ALERTA_CATEGORIAS = [
 function calcularAlertas(jogos, medias) {
   return ALERTA_CATEGORIAS.map(([label, campo, campoMedia, sufixo]) => {
     const linha = Math.floor(medias[campoMedia]) + 0.5;
-    const acima = jogos.filter((jogo) => jogo[campo] > linha).length;
-    const percentual = Math.round((acima / jogos.length) * 100);
+    // Só conta os jogos em que a fonte trouxe essa estatística (null = sem dado).
+    const comDado = jogos.filter((jogo) => jogo[campo] != null);
+    const acima = comDado.filter((jogo) => jogo[campo] > linha).length;
+    const percentual = comDado.length > 0 ? Math.round((acima / comDado.length) * 100) : 0;
     return { label, linha, percentual, sufixo };
   });
-}
-
-function secaoAlertas(jogos, medias) {
-  const secao = document.createElement('div');
-  secao.className = 'resumo-secao';
-  const titulo = document.createElement('h3');
-  titulo.textContent = 'Chances (com base nos últimos jogos)';
-  secao.appendChild(titulo);
-
-  const lista = document.createElement('div');
-  lista.className = 'alertas-lista';
-  calcularAlertas(jogos, medias).forEach(({ label, linha, percentual, sufixo }) => {
-    const chip = document.createElement('div');
-    chip.className = 'alerta-chip';
-    const texto = document.createElement('span');
-    texto.textContent = `${label} > ${linha}${sufixo}`;
-    const valor = document.createElement('span');
-    valor.className = 'alerta-percentual';
-    valor.textContent = `${percentual}%`;
-    chip.append(texto, valor);
-    lista.appendChild(chip);
-  });
-  secao.appendChild(lista);
-
-  const nota = document.createElement('p');
-  nota.className = 'prob-nota';
-  nota.textContent = `Frequência nos últimos ${jogos.length} jogos.`;
-  secao.appendChild(nota);
-
-  return secao;
 }
 
 // --- Modal de resumo ---
@@ -1983,13 +1889,6 @@ function linhaVazia(texto) {
   p.className = 'vazio';
   p.textContent = texto;
   return p;
-}
-
-// Aparece quando o histórico do time veio da GOAL API porque a cota diária
-// da API Futebol acabou (ver formaService.js) - a GOAL API às vezes não traz
-// cartões de um jogo, e sem o dado ele entra como 0 nas médias.
-function avisoFonteAlternativa() {
-  return linhaVazia('Cota diária da API Futebol esgotada - histórico calculado pela GOAL API (em alguns jogos os cartões podem vir incompletos).');
 }
 
 function parsePercentual(valor) {
@@ -2497,11 +2396,8 @@ function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoC
       const partida = partidas[i];
       btnConfirmar.textContent = `Analisando ${i + 1} de ${partidas.length}...`;
 
-      // analise-automatica sempre passa pela API Futebol (não foi estendida
-      // pra Série A), então essa checagem de cota é sempre a dela mesmo,
-      // independente do campeonato selecionado no momento.
       const statusApi = await fetchJSON('/api/status').catch(() => null);
-      if (statusApi && statusApi.usoApi.apiFutebol.hoje >= statusApi.usoApi.apiFutebol.limite) {
+      if (statusApi && statusApi.usoApi.goalApi.hoje >= statusApi.usoApi.goalApi.limite) {
         naoTentados += partidas.length - i;
         break;
       }

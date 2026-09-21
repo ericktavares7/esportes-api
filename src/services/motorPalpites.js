@@ -19,12 +19,7 @@
 //   outlier como "ressalva" do nível moderado).
 
 import { buscarFormaTime } from './formaService.js';
-import { getTabela } from './apiFutebolService.js';
-import { CAMPEONATO_SERIE_A_ID, buscarTabelaSerieA } from './goalApiService.js';
-
-function buscarTabelaPorCampeonato(campeonatoId) {
-  return campeonatoId === CAMPEONATO_SERIE_A_ID ? buscarTabelaSerieA() : getTabela(campeonatoId);
-}
+import { buscarTabela } from './goalApiService.js';
 
 const JOGOS_JANELA = 7; // "os 5 a 7 jogos mais recentes" - pede o teto, usa o que vier
 const AMOSTRA_FRACA = 3; // < 3 de qualquer lado => fraco / não recomendar
@@ -122,6 +117,10 @@ function classificarConfianca({ amostraMandante, amostraVisitante, direcaoConver
 // naquela partida específica) contra a linha candidata - mais preciso que só
 // somar duas médias isoladas, como pede a spec.
 function calcularMercadoTotal({ label, jogosMandante, jogosVisitante, campoFavor, campoContra, nomeMandante, nomeVisitante }) {
+  // Jogos sem a estatística (null: a fonte não trouxe) ficam de fora - a
+  // amostra que o motor enxerga é só a dos jogos com dado de verdade.
+  jogosMandante = jogosMandante.filter((j) => j[campoFavor] != null);
+  jogosVisitante = jogosVisitante.filter((j) => j[campoFavor] != null);
   const valoresMandante = jogosMandante.map((j) => j[campoFavor]);
   const valoresVisitante = jogosVisitante.map((j) => j[campoFavor]);
 
@@ -227,6 +226,9 @@ function calcularAmbasMarcam({ jogosMandante, jogosVisitante, nomeMandante, nome
 // variação real da vantagem - e aplica a margem de segurança de 1.5 quando a
 // diferença esperada é pequena, como pede a spec.
 function calcularHandicapEscanteios({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }) {
+  // Jogos sem escanteios (null: a fonte não trouxe) ficam de fora.
+  jogosMandante = jogosMandante.filter((j) => j.escanteios != null);
+  jogosVisitante = jogosVisitante.filter((j) => j.escanteios != null);
   const anMandante = analisarAmostra(jogosMandante.map((j) => j.escanteios));
   const anVisitante = analisarAmostra(jogosVisitante.map((j) => j.escanteios));
   if (anMandante.amostra === 0 || anVisitante.amostra === 0) return null;
@@ -357,7 +359,7 @@ export async function gerarPalpites(campeonatoId, timeMandanteId, timeVisitanteI
   const [formaMandante, formaVisitante, tabela] = await Promise.all([
     buscarFormaTime(campeonatoId, timeMandanteId, numeroRodada, JOGOS_JANELA, true),
     buscarFormaTime(campeonatoId, timeVisitanteId, numeroRodada, JOGOS_JANELA, false),
-    buscarTabelaPorCampeonato(campeonatoId).catch(() => null),
+    buscarTabela(campeonatoId).catch(() => null),
   ]);
 
   const linhaMandante = tabela?.find((l) => l.time.time_id === timeMandanteId) ?? null;

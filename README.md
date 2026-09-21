@@ -1,7 +1,10 @@
 # Sport Analytics
 
 API em Node.js/Express que busca dados de jogos de futebol brasileiro (partidas, estatísticas,
-escalações e resumos) a partir da [API Futebol](https://api-futebol.com.br/).
+escalações e resumos) a partir da [GOAL API](https://goal-api.com/docs) - fonte única de todos os
+dados (Brasileirão Série B e Série A: jogos, rodadas, tabela, artilharia, estatísticas, ao vivo).
+Antes da migração o app usava a API Futebol; ela só sobrou pra abrir jogos antigos salvos em
+"Jogos pesquisados" com o id numérico dela.
 
 **Em produção:** https://esportes-api.onrender.com (hospedado no Render, plano free — a primeira
 requisição depois de um tempo sem acesso pode demorar ~30-50s pra "acordar" o serviço, e o cache
@@ -9,18 +12,19 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
 
 ## Configuração
 
-1. Crie uma conta gratuita em https://dash.api-futebol.com.br
-2. No painel, copie sua API Key (a `test_...`, pra desenvolver sem gastar o plano; troque pela `live_...` quando for pra produção)
-3. Copie `.env.example` para `.env` e cole a chave:
+1. Crie uma conta em https://goal-api.com e copie sua API Key (o plano grátis dá 1000 requisições/dia)
+2. Copie `.env.example` para `.env` e cole a chave:
    ```
    PORT=3000
-   API_FUTEBOL_KEY=sua_chave_aqui
+   GOAL_API_KEY=sua_chave_aqui
    ```
+   `API_FUTEBOL_KEY` é opcional: só serve pra abrir jogos antigos de "Jogos pesquisados" salvos antes
+   da migração (id numérico da API Futebol).
    As variáveis de IA (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` + seus respectivos
    `_MODEL`) são opcionais - servem só de fallback no servidor. O normal é configurar a chave direto
    pela engrenagem (⚙️) da aba **Chat**, que fica salva só no navegador (ver seção Chat abaixo).
-4. Instale as dependências: `npm install`
-5. Rode em modo desenvolvimento (reinicia sozinho a cada alteração): `npm run dev`
+3. Instale as dependências: `npm install`
+4. Rode em modo desenvolvimento (reinicia sozinho a cada alteração): `npm run dev`
 
 ## Endpoints
 
@@ -28,7 +32,7 @@ SQLite é reiniciado a cada deploy porque o disco do plano free é temporário).
 |---|---|---|
 | GET | `/` | Página web que consome a API (jogos por data, tabela, ao vivo, artilharia) |
 | GET | `/api/status` | Health check |
-| GET | `/api/campeonatos` | Lista só os campeonatos que o plano da sua chave realmente libera (cruza o catálogo completo da API com `/me`) |
+| GET | `/api/campeonatos` | Lista os campeonatos do app (Série B e Série A, ids `goal-serie-b` / `goal-serie-a`) com a rodada atual de cada um |
 | GET | `/api/campeonatos/:id/tabela` | Classificação do campeonato |
 | GET | `/api/campeonatos/:id/artilharia` | Ranking de artilheiros |
 | GET | `/api/campeonatos/:id/rodadas` | Lista as rodadas do campeonato |
@@ -265,30 +269,31 @@ ou o PWA rodando em segundo plano no celular.
 
 ## Cache local (SQLite)
 
-Toda chamada à API Futebol passa primeiro por um cache em SQLite (`data/cache.sqlite`, criado automaticamente — usa o módulo `node:sqlite` nativo do Node, sem dependência extra). Padrão "cache-aside": se já existe uma cópia válida no banco, ela é usada; senão, busca na API real e salva com um prazo de validade.
+Toda chamada à GOAL API passa primeiro por um cache em SQLite (`data/cache.sqlite`, criado automaticamente — usa o módulo `node:sqlite` nativo do Node, sem dependência extra). Padrão "cache-aside": se já existe uma cópia válida no banco, ela é usada; senão, busca na API real e salva com um prazo de validade.
 
 | Dado | Validade |
 |---|---|
-| Lista de campeonatos | 24 horas |
-| Tabela / artilharia | 1 hora |
-| Lista de rodadas | 6 horas |
-| Detalhe de uma rodada | **1 ano** se `status: encerrada` (não muda mais), senão 5 minutos |
+| Jogos da temporada de uma liga (base de rodadas, jogos, forma) | 30 minutos |
+| Tabela | 30 minutos |
+| Artilharia | 1 hora (parte de uma base versionada - ver abaixo) |
 | Jogos ao vivo | 20 segundos |
-| Detalhe de uma partida | **1 ano** se `status: finalizado`, 20s se `andamento`, 1 hora se `agendado` |
+| Estatísticas / eventos / escalação de um jogo | **1 ano** se o jogo começou há mais de 6h, senão 10-15 minutos |
 | Forma recente de um time (agregado) | 30 minutos |
 
-O TTL de rodada e de partida é dinâmico: depende do `status` que a própria API devolve, não é um prazo fixo (ver `comCache` em [src/db/cache.js](src/db/cache.js), que aceita tanto um número de segundos quanto uma função `(dados) => segundos`). Isso significa que jogos e rodadas já encerrados ficam salvos essencialmente pra sempre, e consultar o mesmo time semanas depois não gasta cota nenhuma pros jogos que já aconteceram — só os dados que ainda podem mudar (jogo ao vivo, jogo agendado) são buscados de novo.
+O TTL das estatísticas/eventos é dinâmico: depende de quanto tempo faz que o jogo começou, não é um prazo fixo (ver `comCache` em [src/db/cache.js](src/db/cache.js), que aceita tanto um número de segundos quanto uma função `(dados) => segundos`). Isso significa que jogos e rodadas já encerrados ficam salvos essencialmente pra sempre, e consultar o mesmo time semanas depois não gasta cota nenhuma pros jogos que já aconteceram — só os dados que ainda podem mudar (jogo ao vivo, jogo agendado) são buscados de novo.
 
-Isso reduz muito o consumo da cota diária da API — essencial no plano Free (100 requisições/dia), já que o comparativo pré-jogo sozinho pode gerar dezenas de chamadas na primeira vez que é aberto. O terminal mostra `[cache] HIT`/`[cache] MISS` a cada chamada, pra acompanhar o que está vindo do cache. A pasta `data/` não vai pro Git (é gerada localmente).
+Isso reduz muito o consumo da cota diária da API (1000/dia no plano grátis da GOAL API). Como o disco do Render é temporário, o cache começa vazio a cada deploy/reinício - por isso a artilharia (que exigiria ~280 chamadas por liga, uma por jogo, pra somar os gols) parte de uma **base versionada** em `src/config/artilhariaBase.json` e só busca os jogos que acabaram depois dela. Pra atualizar a base de vez em quando: `node scripts/atualizar-artilharia-base.js`, depois commit/push. O terminal mostra `[cache] HIT`/`[cache] MISS` a cada chamada, pra acompanhar o que está vindo do cache. A pasta `data/` não vai pro Git (é gerada localmente).
 
 ## Estrutura do projeto
 
 ```
 src/
   config/env.js                    variáveis de ambiente
-  config/limites.js                limite diário de requisições da API Futebol
+  config/limites.js                limite diário de requisições (API Futebol e GOAL API)
+  config/artilhariaBase.json       base de gols já apurados por liga (ver seção Cache local)
   db/cache.js                      cache local em SQLite (padrão cache-aside)
-  services/apiFutebolService.js    chamadas HTTP à API Futebol (passam pelo cache)
+  services/goalApiService.js       GOAL API: jogos, rodadas, tabela, artilharia, ao vivo, resumo (passam pelo cache)
+  services/apiFutebolService.js    só abre jogos antigos com id numérico da API Futebol (legado)
   services/formaService.js         forma recente de um time - por quantidade ou por seleção manual de jogos
   services/estatisticasService.js  modelo de Poisson + Chances (mesma lógica do front-end, em Node)
   services/chatTools.js            ferramentas e prompt do chat, compartilhados pelos 3 provedores

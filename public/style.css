@@ -639,6 +639,14 @@ main {
   color: var(--text);
 }
 
+.jogo-linha .situacao.vitoria {
+  color: var(--win);
+}
+
+.jogo-linha .situacao.derrota {
+  color: var(--red);
+}
+
 .jogo-linha .situacao.andamento {
   color: var(--accent);
 }
