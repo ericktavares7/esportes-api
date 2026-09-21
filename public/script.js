@@ -29,6 +29,15 @@ const acertometroEl = document.getElementById('acertometro');
 
 let rodadaExibida = null;
 
+// Esvazia o modal pra abrir um card novo E volta a rolagem pro topo - o
+// elemento que rola é o .modal (pai do #modal-content), e sem isso o card
+// seguinte abria na posição em que o anterior tinha sido deixado, escondendo
+// o nome do time/placar lá em cima.
+function limparModal() {
+  modalContent.replaceChildren();
+  modalContent.parentElement.scrollTop = 0;
+}
+
 
 async function fetchJSON(url, options) {
   const resposta = await fetch(url, options);
@@ -873,7 +882,7 @@ const FAIXA_LABELS = {
 };
 
 async function abrirFormaPreJogo(partida) {
-  modalContent.replaceChildren();
+  limparModal();
   modalBaixarPdfBtn.hidden = true;
   modalVoltarBtn.hidden = true;
   modalVoltarCallback = null;
@@ -1346,7 +1355,7 @@ function criarSegmentoProb(tipo, valor) {
 // --- Modal de perfil do time (histórico + top 5 + próximo jogo) ---
 
 async function abrirPerfilTime(linhaTabela) {
-  modalContent.replaceChildren();
+  limparModal();
   modalBaixarPdfBtn.hidden = true;
   modalVoltarBtn.hidden = true;
   modalVoltarCallback = null;
@@ -1418,13 +1427,21 @@ async function copiarTexto(botao, montarTexto) {
   }
 }
 
+// O botão vem dentro de uma barra "grudada" no topo da rolagem do modal
+// (.barra-copiar no CSS) - assim ele acompanha quem desce o card no celular,
+// sem precisar rolar de volta pra cima pra copiar.
 function botaoCopiar(aoClicar) {
+  const barra = document.createElement('div');
+  barra.className = 'barra-copiar';
+
   const botao = document.createElement('button');
   botao.type = 'button';
   botao.className = 'pesquisados-acao-btn';
   botao.textContent = 'Copiar informações';
   botao.addEventListener('click', () => aoClicar(botao));
-  return botao;
+
+  barra.appendChild(botao);
+  return barra;
 }
 
 // Lista de jogos do time, passados e futuros, tudo num lugar só (tipo o
@@ -1709,7 +1726,7 @@ function calcularAlertas(jogos, medias) {
 // --- Modal de resumo ---
 
 async function abrirResumo(partidaId) {
-  modalContent.replaceChildren();
+  limparModal();
   modalBaixarPdfBtn.hidden = true;
   modalVoltarBtn.hidden = true;
   modalVoltarCallback = null;
@@ -2060,7 +2077,7 @@ function salvarConfigChat(config) {
 
 function abrirConfigChat() {
   const config = carregarConfigChat();
-  modalContent.replaceChildren();
+  limparModal();
   modalBaixarPdfBtn.hidden = true;
   modalVoltarBtn.hidden = true;
   modalVoltarCallback = null;
@@ -2218,7 +2235,7 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
     return;
   }
 
-  modalContent.replaceChildren();
+  limparModal();
   modalBaixarPdfBtn.hidden = true;
   modalVoltarBtn.hidden = true;
   modalVoltarCallback = null;
@@ -2269,7 +2286,7 @@ async function abrirSelecionarJogos(quantidadePadrao, aoConfirmar) {
 }
 
 function montarPickerSelecaoJogos(campeonatoId, agendados, quantidadePadrao, aoConfirmar) {
-  modalContent.replaceChildren();
+  limparModal();
   modalBaixarPdfBtn.hidden = true;
   modalVoltarBtn.hidden = true;
   modalVoltarCallback = null;

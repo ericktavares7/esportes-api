@@ -709,10 +709,11 @@ main {
 }
 
 .modal {
+  --modal-pad: 28px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 28px;
+  padding: var(--modal-pad);
   max-width: 560px;
   width: 100%;
   max-height: 85vh;
@@ -729,6 +730,23 @@ main {
 
 .modal-overlay.active .modal {
   transform: scale(1) translateY(0);
+}
+
+/* Barra do "Copiar informações": gruda no topo da rolagem do modal e vai
+   junto com quem desce o card. As margens negativas esticam a barra até as
+   bordas do modal (cobrindo o padding), pra o conteúdo não aparecer por
+   trás dela nas laterais. */
+.barra-copiar {
+  position: sticky;
+  /* O "top" do sticky conta a partir da área de conteúdo (dentro do padding
+     do modal); o valor negativo cola a barra na borda de cima de verdade -
+     senão sobrariam uns pixels de conteúdo aparecendo por cima dela. */
+  top: calc(var(--modal-pad) * -1);
+  z-index: 2;
+  margin: 0 calc(var(--modal-pad) * -1) 14px;
+  padding: 10px var(--modal-pad);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
 }
 
 .modal-close {
@@ -1362,7 +1380,7 @@ main {
   }
 
   .modal {
-    padding: 20px;
+    --modal-pad: 20px;
     border-radius: 12px;
   }
 
