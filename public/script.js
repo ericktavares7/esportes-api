@@ -1060,8 +1060,9 @@ function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linh
   linhas.push('');
 
   linhas.push(`Médias (${nomeMandante} / ${nomeVisitante})`);
+  const textoMedia = (medias, campo, sufixo) => (medias[campo] != null ? `${medias[campo]}${sufixo}` : '—');
   LINHAS_COMPARATIVO.forEach(([label, campo, sufixo]) => {
-    linhas.push(`${label}: ${formaMandante.medias[campo]}${sufixo} / ${formaVisitante.medias[campo]}${sufixo}`);
+    linhas.push(`${label}: ${textoMedia(formaMandante.medias, campo, sufixo)} / ${textoMedia(formaVisitante.medias, campo, sufixo)}`);
   });
   linhas.push('');
 
@@ -1142,14 +1143,26 @@ function sinaisPerfil(medias) {
     if (condicao) sinais.push({ texto, prioridade });
   };
 
-  push(medias.mediaFinalizacoes >= 13, 'Ataque volumoso', Math.abs(medias.mediaFinalizacoes - 11));
-  push(medias.mediaFinalizacoes <= 8, 'Pouco ofensivo', Math.abs(medias.mediaFinalizacoes - 11));
-  push(medias.mediaPosseDeBola >= 55, 'Domina a posse', Math.abs(medias.mediaPosseDeBola - 50));
-  push(medias.mediaPosseDeBola <= 45, 'Contra-ataque', Math.abs(medias.mediaPosseDeBola - 50));
-  push(medias.mediaFaltas >= 14, 'Jogo físico', Math.abs(medias.mediaFaltas - 11));
-  push(medias.mediaFaltas <= 8, 'Poucas faltas', Math.abs(medias.mediaFaltas - 11));
-  push(medias.mediaChutesNoGol >= 6, 'Finalização certeira', Math.abs(medias.mediaChutesNoGol - 4));
-  push(medias.mediaChutesNoGol <= 3, 'Pouco incisivo', Math.abs(medias.mediaChutesNoGol - 4));
+  // medias.mediaX pode ser null (sem nenhum jogo com esse dado na amostra) -
+  // sem o `!= null`, "null <= 8" avalia true (null vira 0 na comparação) e
+  // gera um chip tipo "Poucas faltas" só por falta de dado, não porque o
+  // time realmente comete poucas faltas.
+  if (medias.mediaFinalizacoes != null) {
+    push(medias.mediaFinalizacoes >= 13, 'Ataque volumoso', Math.abs(medias.mediaFinalizacoes - 11));
+    push(medias.mediaFinalizacoes <= 8, 'Pouco ofensivo', Math.abs(medias.mediaFinalizacoes - 11));
+  }
+  if (medias.mediaPosseDeBola != null) {
+    push(medias.mediaPosseDeBola >= 55, 'Domina a posse', Math.abs(medias.mediaPosseDeBola - 50));
+    push(medias.mediaPosseDeBola <= 45, 'Contra-ataque', Math.abs(medias.mediaPosseDeBola - 50));
+  }
+  if (medias.mediaFaltas != null) {
+    push(medias.mediaFaltas >= 14, 'Jogo físico', Math.abs(medias.mediaFaltas - 11));
+    push(medias.mediaFaltas <= 8, 'Poucas faltas', Math.abs(medias.mediaFaltas - 11));
+  }
+  if (medias.mediaChutesNoGol != null) {
+    push(medias.mediaChutesNoGol >= 6, 'Finalização certeira', Math.abs(medias.mediaChutesNoGol - 4));
+    push(medias.mediaChutesNoGol <= 3, 'Pouco incisivo', Math.abs(medias.mediaChutesNoGol - 4));
+  }
 
   return sinais
     .sort((a, b) => b.prioridade - a.prioridade)
@@ -1631,7 +1644,7 @@ function secaoMediasIndividuais(medias) {
     labelEl.textContent = label;
     const valorEl = document.createElement('span');
     valorEl.className = 'valor';
-    valorEl.textContent = `${medias[campo]}${sufixo}`;
+    valorEl.textContent = medias[campo] != null ? `${medias[campo]}${sufixo}` : '—';
     row.append(labelEl, valorEl);
     card.appendChild(row);
   });
@@ -1713,7 +1726,11 @@ const ALERTA_CATEGORIAS = [
 ];
 
 function calcularAlertas(jogos, medias) {
-  return ALERTA_CATEGORIAS.map(([label, campo, campoMedia, sufixo]) => {
+  // Categoria sem NENHUM jogo com o dado (medias[campoMedia] null, ver
+  // calcularMedias em formaService.js) sai da lista em vez de virar uma
+  // linha tipo "> 0.5  0%" - isso pareceria uma chance real calculada,
+  // quando é só ausência de dado na fonte pra essa amostra.
+  return ALERTA_CATEGORIAS.filter(([, , campoMedia]) => medias[campoMedia] != null).map(([label, campo, campoMedia, sufixo]) => {
     const linha = Math.floor(medias[campoMedia]) + 0.5;
     // Só conta os jogos em que a fonte trouxe essa estatística (null = sem dado).
     const comDado = jogos.filter((jogo) => jogo[campo] != null);

@@ -133,14 +133,20 @@ function montarLinhaForma(fixture, stats, timeId) {
     golsPro,
     golsContra,
     // "Contra" é o que o ADVERSÁRIO fez naquela mesma partida (não é
-    // "escanteios sofridos" no sentido defensivo) - serve pra reconstruir o
-    // total real da partida (escanteios/cartões dos dois lados somados).
+    // "sofrido" no sentido defensivo) - serve pra reconstruir o total real da
+    // partida (dos dois lados somados), usado pelos mercados de over/under do
+    // motor de palpites (motorPalpites.js). Só existe pros campos que viram
+    // mercado - faltas não tem (não é mercado hoje).
     escanteios: pegar(stats.escanteiosCasa, stats.escanteiosFora),
     escanteiosContra: pegarContra(stats.escanteiosCasa, stats.escanteiosFora),
     finalizacoes: pegar(stats.finalizacoesCasa, stats.finalizacoesFora),
+    finalizacoesContra: pegarContra(stats.finalizacoesCasa, stats.finalizacoesFora),
     chutesNoGol: pegar(stats.chutesNoGolCasa, stats.chutesNoGolFora),
+    chutesNoGolContra: pegarContra(stats.chutesNoGolCasa, stats.chutesNoGolFora),
     faltas: pegar(stats.faltasCasa, stats.faltasFora),
+    faltasContra: pegarContra(stats.faltasCasa, stats.faltasFora),
     impedimentos: pegar(stats.impedimentosCasa, stats.impedimentosFora),
+    impedimentosContra: pegarContra(stats.impedimentosCasa, stats.impedimentosFora),
     cartoesAmarelos: pegar(stats.cartoesCasa, stats.cartoesFora),
     cartoesAmarelosContra: pegarContra(stats.cartoesCasa, stats.cartoesFora),
     posseDeBola: pegar(stats.posseCasa, stats.posseFora),
@@ -152,10 +158,15 @@ function calcularMedias(jogos) {
 
   const n = jogos.length;
   // Média só dos jogos que têm aquela estatística (ver montarLinhaForma) -
-  // gols/resultado existem em todos, o resto pode faltar em alguns.
+  // gols/resultado existem em todos, o resto pode faltar em alguns. Sem
+  // NENHUM jogo com o dado, a média fica null (não 0) - um "0 faltas/jogo"
+  // pareceria um valor real, quando é só ausência de dado (efeito visto de
+  // verdade quando o histórico do time cai todo numa janela em que a fonte
+  // não trouxe a estatística). Quem consome (public/script.js,
+  // estatisticasService.js) trata null como "sem dado suficiente".
   const media = (campo) => {
     const valores = jogos.map((jogo) => jogo[campo]).filter((v) => v != null);
-    if (valores.length === 0) return 0;
+    if (valores.length === 0) return null;
     return Math.round((valores.reduce((total, v) => total + v, 0) / valores.length) * 10) / 10;
   };
 

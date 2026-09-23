@@ -180,6 +180,47 @@ function calcularMercadoTotal({ label, jogosMandante, jogosVisitante, campoFavor
   };
 }
 
+// Gols de UM time isolado, não a soma dos dois times como "Total de Gols"
+// (calcularMercadoTotal) já faz - pega um ataque muito fraco/forte ou uma
+// defesa muito sólida que o mercado combinado pode diluir (ex: os dois times
+// têm média parecida no total, mas um deles especificamente quase não marca).
+// Sem uma segunda equipe pra convergir, a barra pra "forte" é mais exigente:
+// exige 75%+ de acerto histórico (não os 55% dos mercados de dois lados).
+function calcularGolsTimeIsolado({ jogos, nomeTime, comoMandante }) {
+  const valores = jogos.map((j) => j.golsPro);
+  const an = analisarAmostra(valores);
+  if (an.amostra === 0) return null;
+
+  const linha = Math.floor(an.media) + 0.5;
+  const direcao = an.media >= linha ? 'mais de' : 'menos de';
+  const acimaDaLinha = valores.filter((v) => v > linha).length;
+  const naDirecao = direcao === 'mais de' ? acimaDaLinha : valores.length - acimaDaLinha;
+  const pctNaDirecao = valores.length > 0 ? naDirecao / valores.length : 0;
+
+  let confianca = 'fraco';
+  if (an.amostra >= AMOSTRA_FRACA && pctNaDirecao >= 0.6) {
+    const varianciaBaixa = an.desvioRelativoMax <= 0.5;
+    if (an.amostra >= AMOSTRA_FORTE && pctNaDirecao >= 0.75 && varianciaBaixa && !an.outlierDetectado) {
+      confianca = 'forte';
+    } else if (an.amostra >= AMOSTRA_MODERADA) {
+      confianca = 'moderado';
+    }
+  }
+
+  return {
+    mercado: `Gols de ${nomeTime}`,
+    linha_sugerida: linha,
+    direcao,
+    confianca,
+    justificativa:
+      `${nomeTime} (${comoMandante ? 'em casa' : 'fora'}): ${an.media} gols/jogo (${an.amostra} jogos). ` +
+      `${naDirecao}/${valores.length} jogos recentes ficaram ${direcao === 'mais de' ? 'acima' : 'abaixo'} de ${linha} (${Math.round(pctNaDirecao * 100)}%).`,
+    amostra_time_a: an.amostra,
+    amostra_time_b: null,
+    outlier_detectado: an.outlierDetectado,
+  };
+}
+
 // Seção 8.3: ambas marcam. Aproximação simples (P(A marca) x P(B marca)) -
 // não é um modelo de Poisson completo, só a frequência histórica direta.
 function calcularAmbasMarcam({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }) {
@@ -392,6 +433,12 @@ export async function gerarPalpites(campeonatoId, timeMandanteId, timeVisitanteI
       calcularMercadoTotal({ label: 'Total de Escanteios', jogosMandante, jogosVisitante, campoFavor: 'escanteios', campoContra: 'escanteiosContra', nomeMandante, nomeVisitante }),
       calcularAmbasMarcam({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }),
       calcularMercadoTotal({ label: 'Total de Cartões Amarelos', jogosMandante, jogosVisitante, campoFavor: 'cartoesAmarelos', campoContra: 'cartoesAmarelosContra', nomeMandante, nomeVisitante }),
+      calcularMercadoTotal({ label: 'Total de Finalizações', jogosMandante, jogosVisitante, campoFavor: 'finalizacoes', campoContra: 'finalizacoesContra', nomeMandante, nomeVisitante }),
+      calcularMercadoTotal({ label: 'Total de Chutes no Gol', jogosMandante, jogosVisitante, campoFavor: 'chutesNoGol', campoContra: 'chutesNoGolContra', nomeMandante, nomeVisitante }),
+      calcularMercadoTotal({ label: 'Total de Impedimentos', jogosMandante, jogosVisitante, campoFavor: 'impedimentos', campoContra: 'impedimentosContra', nomeMandante, nomeVisitante }),
+      calcularMercadoTotal({ label: 'Total de Faltas', jogosMandante, jogosVisitante, campoFavor: 'faltas', campoContra: 'faltasContra', nomeMandante, nomeVisitante }),
+      calcularGolsTimeIsolado({ jogos: jogosMandante, nomeTime: nomeMandante, comoMandante: true }),
+      calcularGolsTimeIsolado({ jogos: jogosVisitante, nomeTime: nomeVisitante, comoMandante: false }),
       calcularHandicapEscanteios({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }),
       calcularDuplaChance({ jogosMandante, jogosVisitante, linhaMandante, linhaVisitante, nomeMandante, nomeVisitante }),
     ]

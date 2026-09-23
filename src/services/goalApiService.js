@@ -115,14 +115,30 @@ function pegarUltimaOcorrencia(lista, tipo) {
 // faltas, impedimentos, posse, defesas, passes) de um fixture. Usado tanto
 // pro "forma" de um time quanto pro resumo de um jogo específico.
 //
-// A GOAL API não tem "Red Cards" nem "Tackles" (desarmes) como tipo de
-// estatística nesse plano (conferido contra jogos reais) - cartoesVermelhos*
-// e desarmes* saem sempre null, não zero, pra não fingir um dado que não
-// existe (ver secaoEstatisticas em public/script.js, que trata null como
-// "não disponível"). Em alguns jogos ela também não traz "Yellow Cards" -
-// aí o campo sai null e quem consome trata como 0.
+// A GOAL API tem dois "níveis" de detalhe entre os jogos: a maioria vem com
+// o pacote completo de tipos, mas ~15-20% (visto em amostra real) só traz um
+// conjunto reduzido (Corners, Ball Possession, Attacks, On/Off Target...),
+// sem Fouls/Yellow Cards/Shots Total/Offsides/Saves/Passes. Não existe
+// substituto pra faltas, impedimentos ou desarmes nesse conjunto reduzido -
+// ficam null nesses jogos (não 0, pra não fingir um dado que não existe;
+// quem consome trata null como "sem dado").
+//
+// Dois campos ainda dá pra recuperar mesmo no conjunto reduzido:
+// - finalizações/chutes no gol: "On Target"/"Off Target" aparecem em TODO
+//   jogo testado (inclusive nos reduzidos) e batem com "Shots On
+//   Goal"/"Shots Total" quando os dois existem (validado em 15 jogos reais:
+//   On Target = Shots On Goal em 14/15, On Target + Off Target = Shots
+//   Total em 13/15) - usados como reserva quando o campo "oficial" falta.
+// - cartão vermelho: existe um tipo "Red Cards", só que ele NUNCA apareceu
+//   com valor 0/0 numa amostra de 24 jogos reais que o tinham - some do
+//   feed em vez de mostrar zero (mesmo padrão de outras federações: time
+//   que não tomou vermelho simplesmente não gera essa estatística). Por
+//   isso, num jogo que tem o feed completo (Yellow Cards presente) mas sem
+//   "Red Cards", o valor inferido é 0, não null - só fica null quando o
+//   jogo inteiro está no conjunto reduzido (sem Yellow Cards também).
+// "Tackles"/desarmes não tem equivalente nem substituto - fica sempre null.
 export async function buscarEstatisticasFixture(fixtureId, kickoffUtc) {
-  return comCache(`goalapi:stats:fixture:v2:${fixtureId}`, ttlPorIdade(kickoffUtc), async () => {
+  return comCache(`goalapi:stats:fixture:v3:${fixtureId}`, ttlPorIdade(kickoffUtc), async () => {
     const stats = await chamar(`/fixtures/${fixtureId}/statistics`);
     const fullTime = stats.match?.fullTime ?? [];
 
@@ -137,17 +153,30 @@ export async function buscarEstatisticasFixture(fixtureId, kickoffUtc) {
         fora: ocorrencia ? parseInt(ocorrencia.away, 10) || 0 : null,
       };
     };
+    const somarPar = (a, b) => (a != null && b != null ? a + b : null);
 
     const corners = numero('Corners');
     const cartoes = numero('Yellow Cards');
-    const finalizacoes = numero('Shots Total');
-    const chutesNoGol = numero('Shots On Goal');
+    const cartoesVermelhos = numero('Red Cards');
     const faltas = numero('Fouls');
     const impedimentos = numero('Offsides');
     const posse = percentual('Ball Possession');
     const defesas = numero('Saves');
     const passesTotais = numero('Passes Total');
     const passesCertos = numero('Passes Accurate');
+
+    const shotsTotal = numero('Shots Total');
+    const shotsOnGoal = numero('Shots On Goal');
+    const onTarget = numero('On Target');
+    const offTarget = numero('Off Target');
+    const finalizacoes = {
+      casa: shotsTotal.casa ?? somarPar(onTarget.casa, offTarget.casa),
+      fora: shotsTotal.fora ?? somarPar(onTarget.fora, offTarget.fora),
+    };
+    const chutesNoGol = {
+      casa: shotsOnGoal.casa ?? onTarget.casa,
+      fora: shotsOnGoal.fora ?? onTarget.fora,
+    };
 
     const precisaoPasse = (totais, certos) =>
       totais != null && certos != null && totais > 0 ? Math.round((certos / totais) * 100) : null;
@@ -157,8 +186,8 @@ export async function buscarEstatisticasFixture(fixtureId, kickoffUtc) {
       escanteiosFora: corners.fora,
       cartoesCasa: cartoes.casa,
       cartoesFora: cartoes.fora,
-      cartoesVermelhosCasa: null,
-      cartoesVermelhosFora: null,
+      cartoesVermelhosCasa: cartoesVermelhos.casa ?? (cartoes.casa != null ? 0 : null),
+      cartoesVermelhosFora: cartoesVermelhos.fora ?? (cartoes.fora != null ? 0 : null),
       finalizacoesCasa: finalizacoes.casa,
       finalizacoesFora: finalizacoes.fora,
       chutesNoGolCasa: chutesNoGol.casa,
@@ -614,6 +643,14 @@ export async function buscarResumoPartidaGoal(fixtureId) {
       mandante: { tecnico: nomeTecnico('home') ? { nome_popular: nomeTecnico('home') } : null },
       visitante: { tecnico: nomeTecnico('away') ? { nome_popular: nomeTecnico('away') } : null },
     },
-    dadosIndisponiveis: { cartoesIndividuais: true, cartoesVermelhos: true, desarmes: true },
+    // cartoesVermelhos só fica indisponível de verdade quando o jogo caiu no
+    // conjunto reduzido de estatísticas (ver buscarEstatisticasFixture) - nos
+    // outros, o valor já vem inferido (0 quando a fonte não lista "Red
+    // Cards", contagem real quando lista).
+    dadosIndisponiveis: {
+      cartoesIndividuais: true,
+      cartoesVermelhos: stats.cartoesVermelhosCasa == null,
+      desarmes: true,
+    },
   };
 }

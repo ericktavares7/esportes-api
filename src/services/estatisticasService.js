@@ -71,7 +71,11 @@ export const ALERTA_CATEGORIAS = [
 ];
 
 export function calcularAlertas(jogos, medias) {
-  return ALERTA_CATEGORIAS.map(([label, campo, campoMedia, sufixo]) => {
+  // Categoria sem NENHUM jogo com o dado (medias[campoMedia] null, ver
+  // calcularMedias em formaService.js) sai da lista em vez de virar uma
+  // linha tipo "> 0.5  0%" - isso pareceria uma chance real calculada,
+  // quando é só ausência de dado na fonte pra essa amostra.
+  return ALERTA_CATEGORIAS.filter(([, , campoMedia]) => medias[campoMedia] != null).map(([label, campo, campoMedia, sufixo]) => {
     const linha = Math.floor(medias[campoMedia]) + 0.5;
     // Só conta os jogos em que a fonte trouxe essa estatística (null = sem
     // dado, ver montarLinhaForma em formaService.js).
