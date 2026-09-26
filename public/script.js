@@ -1027,10 +1027,30 @@ function secaoPalpitesMotor(resultado) {
       cabecalhoItem.append(nomeMercado, selo);
       item.appendChild(cabecalhoItem);
 
+      if (p.probabilidade_estimada != null) {
+        const odd = p.odd_justa != null ? ` - odd justa ${p.odd_justa.toFixed(2)}` : '';
+        item.appendChild(el2('p', 'palpite-motor-meta', `~${p.probabilidade_estimada}% estimado${odd}`));
+      }
       item.appendChild(el2('p', 'palpite-motor-justificativa', p.justificativa));
+      item.appendChild(el2('p', 'palpite-motor-justificativa', `Consistência: mandante ${p.consistencia_mandante} | visitante ${p.consistencia_visitante}`));
+      (p.avisos ?? []).forEach((aviso) => item.appendChild(el2('p', 'palpite-motor-aviso', aviso)));
+      if (p.redundante_com?.length > 0) {
+        item.appendChild(el2('p', 'palpite-motor-aviso', `Redundante com: ${p.redundante_com.join('; ')} - não empilhe.`));
+      }
       lista.appendChild(item);
     });
     secao.appendChild(lista);
+  }
+
+  if (resultado.combinacao_sugerida) {
+    const c = resultado.combinacao_sugerida;
+    const caixa = document.createElement('div');
+    caixa.className = 'palpite-motor-item palpite-motor-combinacao';
+    caixa.appendChild(el2('span', 'palpite-motor-mercado', 'Combinação no mesmo jogo (sem redundância)'));
+    c.mercados.forEach((m) => caixa.appendChild(el2('p', 'palpite-motor-justificativa', `• ${m}`)));
+    caixa.appendChild(el2('p', 'palpite-motor-meta', `~${c.probabilidade_combinada_estimada}% combinado - odd justa ${c.odd_justa_combinada?.toFixed(2)}`));
+    caixa.appendChild(el2('p', 'palpite-motor-aviso', c.aviso));
+    secao.appendChild(caixa);
   }
 
   if (resultado.avisos?.length > 0) {
@@ -1077,8 +1097,13 @@ function montarTextoComparativoJogo(partida, formaMandante, formaVisitante, linh
     resultadoPalpites.palpites.forEach((p) => {
       const jaTemLinha = p.linha_sugerida != null && p.direcao.includes(String(p.linha_sugerida));
       const linha = p.linha_sugerida != null && !jaTemLinha ? `${p.direcao} ${p.linha_sugerida}` : p.direcao;
-      linhas.push(`- ${p.mercado}: ${linha} (${p.confianca})`);
+      const prob = p.probabilidade_estimada != null ? `, ~${p.probabilidade_estimada}% (odd justa ${p.odd_justa?.toFixed(2)})` : '';
+      linhas.push(`- ${p.mercado}: ${linha} (${p.confianca}${prob})`);
     });
+    if (resultadoPalpites.combinacao_sugerida) {
+      const c = resultadoPalpites.combinacao_sugerida;
+      linhas.push(`Combinação sugerida: ${c.mercados.join(' + ')} (~${c.probabilidade_combinada_estimada}%, odd justa ${c.odd_justa_combinada?.toFixed(2)})`);
+    }
   }
 
   return linhas.join('\n').trim();

@@ -34,6 +34,10 @@ db.exec(`
   )
 `);
 
+// Exposto pra módulos que precisam de tabelas próprias no mesmo arquivo
+// (auditoria de palpites). Lembrete: no Render o disco é efêmero.
+export const bancoLocal = db;
+
 const stmtBuscar = db.prepare('SELECT valor, expira_em FROM cache WHERE chave = ?');
 const stmtSalvar = db.prepare(
   'INSERT INTO cache (chave, valor, expira_em) VALUES (?, ?, ?) ' +

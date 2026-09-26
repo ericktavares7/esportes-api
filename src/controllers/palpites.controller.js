@@ -1,4 +1,13 @@
 import { gerarPalpites } from '../services/motorPalpites.js';
+import { relatorioAuditoria } from '../services/auditoriaPalpites.js';
+
+export async function auditoria(req, res, next) {
+  try {
+    res.json(await relatorioAuditoria());
+  } catch (err) {
+    next(err);
+  }
+}
 
 // campeonato_id e time_id são numéricos na API Futebol, mas a Série A
 // (fonte GOAL API, ver [[project-serie-a-test]]) usa ids que não são número

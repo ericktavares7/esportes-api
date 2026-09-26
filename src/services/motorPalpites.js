@@ -1,30 +1,71 @@
-// Motor de análise de palpites (casa/fora + últimos 5-7 jogos) - implementa a
-// especificação combinada com o usuário. Módulo separado do resto do app de
-// propósito: ainda não está ligado à tela principal, só pronto pra testar
-// contra jogos reais antes de decidir se substitui/complementa o sistema de
-// "Palpites fortes" que já existe (baseado em Poisson) em public/script.js.
+// Motor de análise de palpites v2 (casa/fora + janela recente por mando).
+// Implementa a "Especificação: Motor de Análise de Palpites v2" combinada com
+// o usuário. Diferenças principais em relação à v1:
+// - Cada mercado é testado em VÁRIAS linhas e nas DUAS direções; vale a melhor
+//   combinação (maior nível de confiança; empate -> a linha mais perto do
+//   valor esperado, que é a mais informativa; a "mais de 0.5 gol" trivial não
+//   ganha só por ser 100%).
+// - A consistência é medida por time, jogo a jogo, na MESMA linha/direção:
+//   "mandante bateu em 4/4 jogos em casa, visitante em 3/5 fora". A tabela de
+//   confiança usa esses percentuais (85% / 70% / 60%) e o tamanho de amostra.
+// - Redundância entre mercados (ex: "vitória" + "1X") é marcada e a
+//   combinação sugerida só empilha mercados independentes e não contraditórios.
+// - `odd_justa` (1/probabilidade estimada) deixa o usuário comparar com a odd
+//   real da casa; a GOAL API não traz odds, então `valor_estimado` fica null.
 //
-// Pontos da spec que exigiram uma escolha de interpretação (documentados
-// onde aparecem no código, pra revisão):
-// - "outlier > média + 1.5x o desvio dos outros valores" foi implementado
-//   como desvio padrão da amostra completa (não leave-one-out).
-// - "variância baixa" = nenhum jogo individual passa de 50% de distância da
-//   própria média do time; "alta variância" = algum jogo passa de 100%.
-// - "convergem na mesma direção" pros mercados de total (gols/escanteios/
-//   cartões) é medido pela distribuição real jogo a jogo (ver
-//   calcularMercadoTotal) batendo com o lado indicado pela soma das médias,
-//   não só a soma isolada.
-// - outlier detectado nunca deixa classificar como "forte", mesmo com
-//   amostra e variância boas - cai pra "moderado" (a tabela da spec cita
-//   outlier como "ressalva" do nível moderado).
+// Interpretações que a spec deixa em aberto:
+// - "outlier" = valor acima de média + 1.5 x desvio padrão da série; mostra-se
+//   a média com e sem ele (analisarAmostra) e forte nunca convive com outlier.
+// - "variância baixa" = nenhum jogo se afasta mais de 50% da própria média.
+// - Janela de 8 jogos por mando (spec: 5 a 10) - equilíbrio com a cota diária
+//   da GOAL API, já que cada jogo novo custa uma chamada de estatísticas.
+// - Sem amostra de 5+ jogos em algum dos lados o palpite leva `dado_fraco` e
+//   desce um nível; abaixo de 4 num dos lados é "fraco" direto.
 
 import { buscarFormaTime } from './formaService.js';
-import { buscarTabela } from './goalApiService.js';
+import { buscarTabela, buscarTodasFixtures } from './goalApiService.js';
+import { registrarPalpites } from './auditoriaPalpites.js';
 
-const JOGOS_JANELA = 7; // "os 5 a 7 jogos mais recentes" - pede o teto, usa o que vier
-const AMOSTRA_FRACA = 3; // < 3 de qualquer lado => fraco / não recomendar
-const AMOSTRA_MODERADA = 4; // >= 4 de pelo menos um lado => pode virar moderado
-const AMOSTRA_FORTE = 5; // >= 5 dos dois lados => pode virar forte
+const JOGOS_JANELA = 8;
+const AMOSTRA_MINIMA = 4; // abaixo disso em qualquer lado => fraco / não recomendar
+const AMOSTRA_BOA = 5; // exigida pra forte; abaixo disso vira dado_fraco
+const AMOSTRA_ESCANTEIOS_FORTE = 7;
+
+const NIVEIS = ['fraco', 'moderado', 'moderado-forte', 'forte'];
+const rebaixar = (nivel, qtd = 1) => NIVEIS[Math.max(NIVEIS.indexOf(nivel) - qtd, 0)];
+
+const LINHAS = {
+  golsPro: [1.5, 2.5, 3.5, 4.5],
+  escanteios: [7.5, 8.5, 9.5, 10.5, 11.5, 12.5],
+  cartoesAmarelos: [2.5, 3.5, 4.5, 5.5, 6.5],
+  finalizacoes: [19.5, 21.5, 23.5, 25.5, 27.5, 29.5],
+  chutesNoGol: [6.5, 7.5, 8.5, 9.5, 10.5, 11.5],
+  impedimentos: [2.5, 3.5, 4.5, 5.5],
+  faltas: [19.5, 21.5, 23.5, 25.5, 27.5, 29.5],
+};
+const LINHAS_GOLS_TIME = [0.5, 1.5, 2.5];
+const FAIXAS_GOLS = [[1, 3], [1, 4], [2, 4], [2, 5]];
+const LINHAS_HANDICAP_ESCANTEIOS = [0.5, 1.5, 2.5, 3.5];
+
+const ROTULOS = {
+  golsPro: 'Total de Gols',
+  escanteios: 'Total de Escanteios',
+  cartoesAmarelos: 'Total de Cartões Amarelos',
+  finalizacoes: 'Total de Finalizações',
+  chutesNoGol: 'Total de Chutes no Gol',
+  impedimentos: 'Total de Impedimentos',
+  faltas: 'Total de Faltas',
+};
+// Campo do total (favor + contra) -> campo "contra" da linha de forma.
+const CAMPO_CONTRA = {
+  golsPro: 'golsContra',
+  escanteios: 'escanteiosContra',
+  cartoesAmarelos: 'cartoesAmarelosContra',
+  finalizacoes: 'finalizacoesContra',
+  chutesNoGol: 'chutesNoGolContra',
+  impedimentos: 'impedimentosContra',
+  faltas: 'faltasContra',
+};
 
 const CONTEXTO_FAIXA = {
   rebaixados: 'briga_rebaixamento',
@@ -53,9 +94,8 @@ function desvioPadrao(valores, mediaValor) {
   return Math.sqrt(variancia);
 }
 
-// Seção 3: média + detecção de outlier. Só troca a média principal pela
-// versão sem outlier se a diferença entre as duas passar de 30% - caso
-// contrário o outlier fica, mas nada muda no resultado.
+// Média + detecção de outlier. Só troca a média principal pela versão sem
+// outlier se a diferença entre as duas passar de 30%.
 function analisarAmostra(valores) {
   if (valores.length === 0) {
     return { media: null, mediaComOutlier: null, outlierDetectado: false, amostra: 0, desvioRelativoMax: null };
@@ -70,332 +110,464 @@ function analisarAmostra(valores) {
     ? Math.max(...valores.map((v) => Math.abs(v - mediaCompleta) / mediaCompleta))
     : 0;
 
+  const base = { amostra: valores.length, desvioRelativoMax };
   if (semOutliers.length === valores.length || semOutliers.length === 0) {
-    return { media: arredondar(mediaCompleta), mediaComOutlier: arredondar(mediaCompleta), outlierDetectado: false, amostra: valores.length, desvioRelativoMax };
+    return { ...base, media: arredondar(mediaCompleta), mediaComOutlier: arredondar(mediaCompleta), outlierDetectado: false };
   }
 
   const mediaSemOutlier = media(semOutliers);
   const diferencaPct = mediaCompleta === 0 ? 0 : Math.abs(mediaCompleta - mediaSemOutlier) / mediaCompleta;
-
   if (diferencaPct > 0.3) {
-    return { media: arredondar(mediaSemOutlier), mediaComOutlier: arredondar(mediaCompleta), outlierDetectado: true, amostra: valores.length, desvioRelativoMax };
+    return { ...base, media: arredondar(mediaSemOutlier), mediaComOutlier: arredondar(mediaCompleta), outlierDetectado: true };
   }
-  return { media: arredondar(mediaCompleta), mediaComOutlier: arredondar(mediaCompleta), outlierDetectado: false, amostra: valores.length, desvioRelativoMax };
+  return { ...base, media: arredondar(mediaCompleta), mediaComOutlier: arredondar(mediaCompleta), outlierDetectado: false };
 }
 
-// Seção 5: tabela de decisão de confiança. "Alta variância"/"dados
-// contraditórios" da spec já ficam cobertos por `direcaoConvergente` (cada
-// função de mercado decide o que conta como contraditório pro caso dela) -
-// não existe um segundo corte automático por desvio aqui, só o requisito de
-// variância BAIXA pra chegar em "forte".
-function classificarConfianca({ amostraMandante, amostraVisitante, direcaoConvergente, desvioRelativoMaxMandante, desvioRelativoMaxVisitante, outlierDetectado }) {
-  const menorAmostra = Math.min(amostraMandante, amostraVisitante);
-  const maiorAmostra = Math.max(amostraMandante, amostraVisitante);
+// Tabela de confiança (seção 4). Cada lado (mandante/visitante) traz
+// { hit, n }: em quantos dos n jogos daquele time o critério bateu.
+//  - fraco: algum lado com < 4 jogos, ou algum lado abaixo de 60%
+//  - forte: os dois >= 85%, 5+ jogos de cada lado, sem outlier
+//  - moderado-forte: os dois >= 70%, ou um lado >= 85% e o outro >= 60%
+//  - moderado: os dois >= 60%
+// Amostra < 5 num dos lados = dado_fraco e desce um nível. Escanteios (o mais
+// volátil) só chega em forte com 7+ jogos dos dois lados e variância baixa.
+function classificar({ ladoA, ladoB, outlier, varianciaBaixa, ehEscanteios }) {
+  const nA = ladoA.n;
+  const nB = ladoB.n;
+  const pA = nA > 0 ? ladoA.hit / nA : 0;
+  const pB = nB > 0 ? ladoB.hit / nB : 0;
+  const menorPct = Math.min(pA, pB);
+  const dadoFraco = Math.min(nA, nB) < AMOSTRA_BOA;
 
-  if (menorAmostra < AMOSTRA_FRACA || !direcaoConvergente) {
-    return 'fraco';
+  if (Math.min(nA, nB) < AMOSTRA_MINIMA || menorPct < 0.6) {
+    return { confianca: 'fraco', dadoFraco, pA, pB };
   }
 
-  const varianciaBaixa = desvioRelativoMaxMandante <= 0.5 && desvioRelativoMaxVisitante <= 0.5;
-  const amostraForteDosDoisLados = amostraMandante >= AMOSTRA_FORTE && amostraVisitante >= AMOSTRA_FORTE;
+  let confianca = 'moderado';
+  if (menorPct >= 0.7 || Math.max(pA, pB) >= 0.85) confianca = 'moderado-forte';
+  if (menorPct >= 0.85 && !dadoFraco && !outlier) confianca = 'forte';
 
-  if (amostraForteDosDoisLados && varianciaBaixa && !outlierDetectado) {
-    return 'forte';
+  if (ehEscanteios && confianca === 'forte') {
+    const amostraOk = nA >= AMOSTRA_ESCANTEIOS_FORTE && nB >= AMOSTRA_ESCANTEIOS_FORTE;
+    if (!amostraOk || !varianciaBaixa) confianca = 'moderado-forte';
   }
+  if (dadoFraco) confianca = rebaixar(confianca);
 
-  if (maiorAmostra >= AMOSTRA_MODERADA) {
-    return 'moderado';
-  }
-
-  return 'fraco';
+  return { confianca, dadoFraco, pA, pB };
 }
 
-// Seção 4 + parte da 8: mercados de "total" (gols, escanteios, cartões
-// amarelos). total_esperado soma a média de cada lado (mandante em casa +
-// visitante fora); a distribuição real cruza o total de CADA jogo já
-// disputado por cada time (o que ele fez + o que o adversário dele fez
-// naquela partida específica) contra a linha candidata - mais preciso que só
-// somar duas médias isoladas, como pede a spec.
-function calcularMercadoTotal({ label, jogosMandante, jogosVisitante, campoFavor, campoContra, nomeMandante, nomeVisitante }) {
-  // Jogos sem a estatística (null: a fonte não trouxe) ficam de fora - a
-  // amostra que o motor enxerga é só a dos jogos com dado de verdade.
-  jogosMandante = jogosMandante.filter((j) => j[campoFavor] != null);
-  jogosVisitante = jogosVisitante.filter((j) => j[campoFavor] != null);
-  const valoresMandante = jogosMandante.map((j) => j[campoFavor]);
-  const valoresVisitante = jogosVisitante.map((j) => j[campoFavor]);
+const fmtLado = (lado) => `${lado.n > 0 ? Math.round((lado.hit / lado.n) * 100) : 0}% (${lado.hit}/${lado.n} jogos)`;
 
-  const anMandante = analisarAmostra(valoresMandante);
-  const anVisitante = analisarAmostra(valoresVisitante);
-  if (anMandante.amostra === 0 || anVisitante.amostra === 0) return null;
+function contar(jogos, valorFn, testeFn) {
+  const valores = jogos.map(valorFn).filter((v) => v != null);
+  return { hit: valores.filter(testeFn).length, n: valores.length };
+}
 
-  const totalEsperado = anMandante.media + anVisitante.media;
-  const linha = Math.floor(totalEsperado) + 0.5;
-
-  const totaisReais = [
-    ...jogosMandante.map((j) => j[campoFavor] + (j[campoContra] ?? 0)),
-    ...jogosVisitante.map((j) => j[campoFavor] + (j[campoContra] ?? 0)),
-  ];
-  const direcao = totalEsperado >= linha ? 'mais de' : 'menos de';
-  const acimaDaLinha = totaisReais.filter((v) => v > linha).length;
-  const pctNaDirecao = totaisReais.length > 0
-    ? (direcao === 'mais de' ? acimaDaLinha : totaisReais.length - acimaDaLinha) / totaisReais.length
-    : 0;
-
-  // "Convergem na mesma direção" de verdade combina dois sinais, não só um:
-  // 1) cada time, isoladamente, precisa contribuir mais que a "metade que
-  //    cabia a ele" na linha - se um empurra pra cima e o outro pra baixo, é
-  //    sinal contraditório, mesmo que a soma bata na conta;
-  // 2) a distribuição real (jogo a jogo) também precisa apoiar minimamente
-  //    essa direção (>=55%) - sem isso, dava pra classificar como
-  //    moderado/forte um mercado cuja própria evidência no texto mostrasse
-  //    perto de 50/50, o que fica contraditório pra quem lê o resultado.
-  const metadeLinha = linha / 2;
-  const mandanteApoiaMais = anMandante.media > metadeLinha;
-  const visitanteApoiaMais = anVisitante.media > metadeLinha;
-  const timesConvergem = mandanteApoiaMais === visitanteApoiaMais;
-  const direcaoConvergente = timesConvergem && pctNaDirecao >= 0.55;
-
-  const confianca = classificarConfianca({
-    amostraMandante: anMandante.amostra,
-    amostraVisitante: anVisitante.amostra,
-    direcaoConvergente,
-    desvioRelativoMaxMandante: anMandante.desvioRelativoMax,
-    desvioRelativoMaxVisitante: anVisitante.desvioRelativoMax,
-    outlierDetectado: anMandante.outlierDetectado || anVisitante.outlierDetectado,
+// Desempate entre candidatos do mesmo mercado: maior nível, depois a linha
+// mais próxima do valor esperado (a mais informativa), depois o maior piso de
+// consistência.
+function escolherMelhor(candidatos) {
+  const validos = candidatos.filter(Boolean);
+  if (validos.length === 0) return null;
+  validos.sort((a, b) => {
+    const dNivel = NIVEIS.indexOf(b.avaliacao.confianca) - NIVEIS.indexOf(a.avaliacao.confianca);
+    if (dNivel !== 0) return dNivel;
+    const dDist = (a.distancia ?? 0) - (b.distancia ?? 0);
+    if (Math.abs(dDist) > 1e-9) return dDist;
+    return Math.min(b.avaliacao.pA, b.avaliacao.pB) - Math.min(a.avaliacao.pA, a.avaliacao.pB);
   });
+  return validos[0];
+}
+
+// Monta o objeto final de palpite a partir do melhor candidato.
+function montarPalpite({ mercado, direcao, linha, candidato, nomeMandante, nomeVisitante, textoA, textoB, meta, avisosExtras = [] }) {
+  const { avaliacao, ladoA, ladoB, outlier } = candidato;
+  const prob = (avaliacao.pA + avaliacao.pB) / 2;
+  const avisos = [...avisosExtras];
+  if (avaliacao.dadoFraco) avisos.push('Amostra menor que 5 jogos em algum dos lados (dado_fraco): confiança rebaixada um nível.');
+  if (outlier) avisos.push('Outlier na amostra: a média principal usa o valor sem o jogo atípico.');
+
+  if (prob > 0 && 1 / prob < 1.2) avisos.push('Odd justa abaixo de 1.20: palpite "seguro" demais, dificilmente a casa paga o suficiente pra ter valor.');
+
+  // Contradição: um time aponta forte pra direção, o outro é contra.
+  const maior = Math.max(avaliacao.pA, avaliacao.pB);
+  const menor = Math.min(avaliacao.pA, avaliacao.pB);
+  const contradicao = maior >= 0.7 && menor <= 0.4;
+  let confianca = avaliacao.confianca;
+  if (contradicao) {
+    confianca = rebaixar(confianca);
+    avisos.push('Os dois times apontam em direções opostas (contradição): confiança rebaixada.');
+  }
 
   return {
-    mercado: label,
+    mercado,
     linha_sugerida: linha,
     direcao,
     confianca,
-    justificativa:
-      `${nomeMandante} casa: ${anMandante.media}/jogo (${anMandante.amostra} jogos). ` +
-      `${nomeVisitante} fora: ${anVisitante.media}/jogo (${anVisitante.amostra} jogos). ` +
-      `${direcao === 'mais de' ? acimaDaLinha : totaisReais.length - acimaDaLinha}/${totaisReais.length} jogos recentes combinados ficaram ` +
-      `${direcao === 'mais de' ? 'acima' : 'abaixo'} de ${linha} (${Math.round(pctNaDirecao * 100)}%).`,
-    amostra_time_a: anMandante.amostra,
-    amostra_time_b: anVisitante.amostra,
-    outlier_detectado: anMandante.outlierDetectado || anVisitante.outlierDetectado,
+    probabilidade_estimada: Math.round(prob * 100),
+    odd_justa: prob > 0 ? arredondar(1 / prob) : null,
+    consistencia_mandante: fmtLado(ladoA),
+    consistencia_visitante: fmtLado(ladoB),
+    justificativa: `${nomeMandante} (casa): ${textoA}. ${nomeVisitante} (fora): ${textoB}.`,
+    amostra_time_a: ladoA.n,
+    amostra_time_b: ladoB.n,
+    outlier_detectado: !!outlier,
+    dado_fraco: avaliacao.dadoFraco,
+    contradicao_detectada: contradicao,
+    redundante_com: [],
+    valor_estimado: null,
+    avisos,
+    meta,
   };
 }
 
-// Gols de UM time isolado, não a soma dos dois times como "Total de Gols"
-// (calcularMercadoTotal) já faz - pega um ataque muito fraco/forte ou uma
-// defesa muito sólida que o mercado combinado pode diluir (ex: os dois times
-// têm média parecida no total, mas um deles especificamente quase não marca).
-// Sem uma segunda equipe pra convergir, a barra pra "forte" é mais exigente:
-// exige 75%+ de acerto histórico (não os 55% dos mercados de dois lados).
-function calcularGolsTimeIsolado({ jogos, nomeTime, comoMandante }) {
-  const valores = jogos.map((j) => j.golsPro);
-  const an = analisarAmostra(valores);
-  if (an.amostra === 0) return null;
+// Mercados de total (gols, escanteios, cartões, ...): testa cada linha nas
+// duas direções contando, jogo a jogo de CADA time, quantas partidas (o que o
+// time fez + o que o adversário fez ali) passaram/ficaram abaixo da linha.
+function calcularMercadoTotal({ campo, jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }) {
+  const campoContra = CAMPO_CONTRA[campo];
+  const totalDe = (j) => (j[campo] != null && j[campoContra] != null ? j[campo] + j[campoContra] : null);
 
-  const linha = Math.floor(an.media) + 0.5;
-  const direcao = an.media >= linha ? 'mais de' : 'menos de';
-  const acimaDaLinha = valores.filter((v) => v > linha).length;
-  const naDirecao = direcao === 'mais de' ? acimaDaLinha : valores.length - acimaDaLinha;
-  const pctNaDirecao = valores.length > 0 ? naDirecao / valores.length : 0;
+  const seriesA = jogosMandante.map(totalDe).filter((v) => v != null);
+  const seriesB = jogosVisitante.map(totalDe).filter((v) => v != null);
+  if (seriesA.length === 0 || seriesB.length === 0) return null;
 
-  let confianca = 'fraco';
-  if (an.amostra >= AMOSTRA_FRACA && pctNaDirecao >= 0.6) {
-    const varianciaBaixa = an.desvioRelativoMax <= 0.5;
-    if (an.amostra >= AMOSTRA_FORTE && pctNaDirecao >= 0.75 && varianciaBaixa && !an.outlierDetectado) {
-      confianca = 'forte';
-    } else if (an.amostra >= AMOSTRA_MODERADA) {
-      confianca = 'moderado';
+  const anA = analisarAmostra(seriesA);
+  const anB = analisarAmostra(seriesB);
+  const outlier = anA.outlierDetectado || anB.outlierDetectado;
+  const varianciaBaixa = anA.desvioRelativoMax <= 0.5 && anB.desvioRelativoMax <= 0.5;
+  const esperado = (anA.media + anB.media) / 2;
+
+  const candidatos = [];
+  for (const linha of LINHAS[campo]) {
+    for (const direcao of ['mais de', 'menos de']) {
+      const teste = direcao === 'mais de' ? (v) => v > linha : (v) => v < linha;
+      const ladoA = contar(jogosMandante, totalDe, teste);
+      const ladoB = contar(jogosVisitante, totalDe, teste);
+      candidatos.push({
+        direcao, linha, ladoA, ladoB, outlier,
+        distancia: Math.abs(linha - esperado),
+        avaliacao: classificar({ ladoA, ladoB, outlier, varianciaBaixa, ehEscanteios: campo === 'escanteios' }),
+      });
     }
   }
 
-  return {
-    mercado: `Gols de ${nomeTime}`,
-    linha_sugerida: linha,
-    direcao,
-    confianca,
-    justificativa:
-      `${nomeTime} (${comoMandante ? 'em casa' : 'fora'}): ${an.media} gols/jogo (${an.amostra} jogos). ` +
-      `${naDirecao}/${valores.length} jogos recentes ficaram ${direcao === 'mais de' ? 'acima' : 'abaixo'} de ${linha} (${Math.round(pctNaDirecao * 100)}%).`,
-    amostra_time_a: an.amostra,
-    amostra_time_b: null,
-    outlier_detectado: an.outlierDetectado,
-  };
+  const melhor = escolherMelhor(candidatos);
+  const unidade = ROTULOS[campo].replace('Total de ', '').toLowerCase();
+  const avisosExtras = campo === 'escanteios'
+    ? ['Escanteios é o mercado mais volátil: só chega em forte com 7+ jogos de cada lado e variância baixa.']
+    : [];
+  const textoMedia = (an) => `média de ${an.media} ${unidade} por jogo${an.outlierDetectado ? ` (${an.mediaComOutlier} contando o jogo atípico)` : ''}`;
+  const verbo = melhor.direcao === 'mais de' ? 'acima' : 'abaixo';
+
+  return montarPalpite({
+    mercado: ROTULOS[campo],
+    direcao: melhor.direcao,
+    linha: melhor.linha,
+    candidato: melhor,
+    nomeMandante, nomeVisitante,
+    textoA: `${textoMedia(anA)}, ${melhor.ladoA.hit}/${melhor.ladoA.n} jogos ${verbo} de ${melhor.linha}`,
+    textoB: `${textoMedia(anB)}, ${melhor.ladoB.hit}/${melhor.ladoB.n} jogos ${verbo} de ${melhor.linha}`,
+    meta: { tipo: campo === 'golsPro' ? 'total_gols' : 'total', campo, linha: melhor.linha, direcao: melhor.direcao },
+    avisosExtras,
+  });
 }
 
-// Seção 8.3: ambas marcam. Aproximação simples (P(A marca) x P(B marca)) -
-// não é um modelo de Poisson completo, só a frequência histórica direta.
+// Faixas de gols totais (1-3, 1-4...): "dentro" da faixa.
+function calcularFaixaGols({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }) {
+  const totalDe = (j) => j.golsPro + j.golsContra;
+  const anA = analisarAmostra(jogosMandante.map(totalDe));
+  const anB = analisarAmostra(jogosVisitante.map(totalDe));
+  if (anA.amostra === 0 || anB.amostra === 0) return null;
+  const outlier = anA.outlierDetectado || anB.outlierDetectado;
+  const varianciaBaixa = anA.desvioRelativoMax <= 0.5 && anB.desvioRelativoMax <= 0.5;
+  const esperado = (anA.media + anB.media) / 2;
+
+  const candidatos = FAIXAS_GOLS.map(([min, max]) => {
+    const teste = (v) => v >= min && v <= max;
+    const ladoA = contar(jogosMandante, totalDe, teste);
+    const ladoB = contar(jogosVisitante, totalDe, teste);
+    return {
+      min, max, ladoA, ladoB, outlier,
+      distancia: Math.abs((min + max) / 2 - esperado),
+      avaliacao: classificar({ ladoA, ladoB, outlier, varianciaBaixa, ehEscanteios: false }),
+    };
+  });
+  const melhor = escolherMelhor(candidatos);
+
+  return montarPalpite({
+    mercado: 'Faixa de Gols',
+    direcao: `entre ${melhor.min} e ${melhor.max} gols`,
+    linha: null,
+    candidato: melhor,
+    nomeMandante, nomeVisitante,
+    textoA: `${melhor.ladoA.hit}/${melhor.ladoA.n} jogos com ${melhor.min} a ${melhor.max} gols no total`,
+    textoB: `${melhor.ladoB.hit}/${melhor.ladoB.n} jogos com ${melhor.min} a ${melhor.max} gols no total`,
+    meta: { tipo: 'faixa_gols', min: melhor.min, max: melhor.max },
+  });
+}
+
+// Gols de UM time: o lado A é quanto o próprio time marca; o lado B, quanto o
+// adversário costuma sofrer (gols contra dele nos jogos dele no mando oposto).
+function calcularGolsTime({ jogosTime, jogosAdversario, nomeTime, nomeAdversario, timeEhMandante }) {
+  const anProprio = analisarAmostra(jogosTime.map((j) => j.golsPro));
+  const anAdversario = analisarAmostra(jogosAdversario.map((j) => j.golsContra));
+  if (anProprio.amostra === 0 || anAdversario.amostra === 0) return null;
+  const outlier = anProprio.outlierDetectado || anAdversario.outlierDetectado;
+  const varianciaBaixa = anProprio.desvioRelativoMax <= 0.5 && anAdversario.desvioRelativoMax <= 0.5;
+  const esperado = (anProprio.media + anAdversario.media) / 2;
+
+  const candidatos = [];
+  for (const linha of LINHAS_GOLS_TIME) {
+    for (const direcao of ['mais de', 'menos de']) {
+      const teste = direcao === 'mais de' ? (v) => v > linha : (v) => v < linha;
+      const ladoProprio = contar(jogosTime, (j) => j.golsPro, teste);
+      const ladoAdversario = contar(jogosAdversario, (j) => j.golsContra, teste);
+      // Mantém a ordem mandante/visitante pra consistencia_mandante/visitante.
+      const ladoA = timeEhMandante ? ladoProprio : ladoAdversario;
+      const ladoB = timeEhMandante ? ladoAdversario : ladoProprio;
+      candidatos.push({
+        direcao, linha, ladoA, ladoB, outlier,
+        distancia: Math.abs(linha - esperado),
+        avaliacao: classificar({ ladoA, ladoB, outlier, varianciaBaixa, ehEscanteios: false }),
+      });
+    }
+  }
+  const melhor = escolherMelhor(candidatos);
+  const nomeMandante = timeEhMandante ? nomeTime : nomeAdversario;
+  const nomeVisitante = timeEhMandante ? nomeAdversario : nomeTime;
+  const verbo = melhor.direcao === 'mais de' ? 'acima' : 'abaixo';
+  const ladoProprio = timeEhMandante ? melhor.ladoA : melhor.ladoB;
+  const ladoAdv = timeEhMandante ? melhor.ladoB : melhor.ladoA;
+
+  const palpite = montarPalpite({
+    mercado: `Gols de ${nomeTime}`,
+    direcao: melhor.direcao,
+    linha: melhor.linha,
+    candidato: melhor,
+    nomeMandante, nomeVisitante,
+    textoA: '',
+    textoB: '',
+    meta: { tipo: 'gols_time', lado: timeEhMandante ? 'mandante' : 'visitante', linha: melhor.linha, direcao: melhor.direcao },
+  });
+  palpite.justificativa =
+    `${nomeTime} (${timeEhMandante ? 'casa' : 'fora'}): ${anProprio.media} gols/jogo, ${ladoProprio.hit}/${ladoProprio.n} jogos ${verbo} de ${melhor.linha}. ` +
+    `${nomeAdversario} (${timeEhMandante ? 'fora' : 'casa'}) sofre ${anAdversario.media} gols/jogo, ${ladoAdv.hit}/${ladoAdv.n} jogos ${verbo} de ${melhor.linha} sofridos.`;
+  return palpite;
+}
+
+// Ambas marcam, jogo a jogo: quantos jogos de cada time tiveram gol dos dois.
 function calcularAmbasMarcam({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }) {
   if (jogosMandante.length === 0 || jogosVisitante.length === 0) return null;
+  const ambos = (j) => j.golsPro > 0 && j.golsContra > 0;
+  const anA = analisarAmostra(jogosMandante.map((j) => j.golsPro));
+  const anB = analisarAmostra(jogosVisitante.map((j) => j.golsPro));
+  const varianciaBaixa = anA.desvioRelativoMax <= 0.5 && anB.desvioRelativoMax <= 0.5;
 
-  const marcouMandante = jogosMandante.filter((j) => j.golsPro > 0).length;
-  const marcouVisitante = jogosVisitante.filter((j) => j.golsPro > 0).length;
-  const pctMandanteMarca = marcouMandante / jogosMandante.length;
-  const pctVisitanteMarca = marcouVisitante / jogosVisitante.length;
-
-  const estimativaSim = pctMandanteMarca * pctVisitanteMarca;
-  const direcao = estimativaSim >= 0.5 ? 'sim' : 'não';
-  const direcaoConvergente = (pctMandanteMarca >= 0.5) === (pctVisitanteMarca >= 0.5);
-
-  const anMandante = analisarAmostra(jogosMandante.map((j) => j.golsPro));
-  const anVisitante = analisarAmostra(jogosVisitante.map((j) => j.golsPro));
-
-  const confianca = classificarConfianca({
-    amostraMandante: jogosMandante.length,
-    amostraVisitante: jogosVisitante.length,
-    direcaoConvergente,
-    desvioRelativoMaxMandante: anMandante.desvioRelativoMax,
-    desvioRelativoMaxVisitante: anVisitante.desvioRelativoMax,
-    outlierDetectado: false,
+  const candidatos = ['sim', 'não'].map((direcao) => {
+    const teste = direcao === 'sim' ? ambos : (j) => !ambos(j);
+    const conta = (jogos) => ({ hit: jogos.filter(teste).length, n: jogos.length });
+    const ladoA = conta(jogosMandante);
+    const ladoB = conta(jogosVisitante);
+    return { direcao, ladoA, ladoB, outlier: false, distancia: 0, avaliacao: classificar({ ladoA, ladoB, outlier: false, varianciaBaixa, ehEscanteios: false }) };
   });
+  const melhor = escolherMelhor(candidatos);
 
-  return {
+  return montarPalpite({
     mercado: 'Ambas Equipes Marcam',
-    linha_sugerida: null,
-    direcao,
-    confianca,
-    justificativa:
-      `${nomeMandante} marcou em ${marcouMandante}/${jogosMandante.length} jogos em casa. ` +
-      `${nomeVisitante} marcou em ${marcouVisitante}/${jogosVisitante.length} jogos fora.`,
-    amostra_time_a: jogosMandante.length,
-    amostra_time_b: jogosVisitante.length,
-    outlier_detectado: false,
-  };
+    direcao: melhor.direcao,
+    linha: null,
+    candidato: melhor,
+    nomeMandante, nomeVisitante,
+    textoA: `${melhor.ladoA.hit}/${melhor.ladoA.n} jogos ${melhor.direcao === 'sim' ? 'com gol dos dois lados' : 'em que pelo menos um lado não marcou'}`,
+    textoB: `${melhor.ladoB.hit}/${melhor.ladoB.n} jogos ${melhor.direcao === 'sim' ? 'com gol dos dois lados' : 'em que pelo menos um lado não marcou'}`,
+    meta: { tipo: 'ambas_marcam', direcao: melhor.direcao },
+  });
 }
 
-// Seção 8.5: handicap de escanteios. Não dá pra cruzar jogo a jogo de
-// verdade (mandante e visitante jogaram contra adversários diferentes no
-// passado), então usa o produto cartesiano dos dois recortes como proxy da
-// variação real da vantagem - e aplica a margem de segurança de 1.5 quando a
-// diferença esperada é pequena, como pede a spec.
+// Handicap de escanteios: saldo de escanteios do favorito em cada jogo dele
+// (o que fez menos o que o adversário fez) contra uma margem, e o inverso pro
+// adversário (saldo negativo de pelo menos essa margem).
 function calcularHandicapEscanteios({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }) {
-  // Jogos sem escanteios (null: a fonte não trouxe) ficam de fora.
-  jogosMandante = jogosMandante.filter((j) => j.escanteios != null);
-  jogosVisitante = jogosVisitante.filter((j) => j.escanteios != null);
-  const anMandante = analisarAmostra(jogosMandante.map((j) => j.escanteios));
-  const anVisitante = analisarAmostra(jogosVisitante.map((j) => j.escanteios));
-  if (anMandante.amostra === 0 || anVisitante.amostra === 0) return null;
+  const saldo = (j) => (j.escanteios != null && j.escanteiosContra != null ? j.escanteios - j.escanteiosContra : null);
+  const saldosA = jogosMandante.map(saldo).filter((v) => v != null);
+  const saldosB = jogosVisitante.map(saldo).filter((v) => v != null);
+  if (saldosA.length === 0 || saldosB.length === 0) return null;
 
-  const diferencaEsperada = anMandante.media - anVisitante.media;
-  const favorito = diferencaEsperada >= 0 ? nomeMandante : nomeVisitante;
-  const diferencaAbs = Math.abs(diferencaEsperada);
+  const anA = analisarAmostra(saldosA.map((v) => Math.abs(v)));
+  const anB = analisarAmostra(saldosB.map((v) => Math.abs(v)));
+  const mediaA = media(saldosA);
+  const mediaB = media(saldosB);
+  // Diferença esperada a favor do mandante: o que ele ganha em casa mais o que
+  // o visitante perde fora, dividido por dois.
+  const esperada = (mediaA - mediaB) / 2;
+  const mandanteFavorito = esperada >= 0;
+  const favorito = mandanteFavorito ? nomeMandante : nomeVisitante;
+  const outlier = anA.outlierDetectado || anB.outlierDetectado;
+  const varianciaBaixa = anA.desvioRelativoMax <= 0.5 && anB.desvioRelativoMax <= 0.5;
 
-  const diferencasIndividuais = [];
-  jogosMandante.forEach((jm) => {
-    jogosVisitante.forEach((jv) => {
-      diferencasIndividuais.push(jm.escanteios - jv.escanteios);
-    });
+  const candidatos = LINHAS_HANDICAP_ESCANTEIOS.map((linha) => {
+    const mandanteBate = (v) => v > linha; // saldo do mandante
+    const visitanteBate = (v) => v < -linha; // saldo do visitante (negativo = adversário domina)
+    const ladoA = contar(jogosMandante, saldo, mandanteFavorito ? mandanteBate : (v) => v < -linha);
+    const ladoB = contar(jogosVisitante, saldo, mandanteFavorito ? visitanteBate : (v) => v > linha);
+    return {
+      linha, ladoA, ladoB, outlier,
+      distancia: Math.abs(linha - Math.abs(esperada)),
+      avaliacao: classificar({ ladoA, ladoB, outlier, varianciaBaixa, ehEscanteios: true }),
+    };
   });
-  const mesmoLado = diferencasIndividuais.filter((d) => (diferencaEsperada >= 0 ? d > 0 : d < 0)).length;
-  const pctMesmoLado = diferencasIndividuais.length > 0 ? mesmoLado / diferencasIndividuais.length : 0;
-  const direcaoConvergente = pctMesmoLado >= 0.6;
+  const melhor = escolherMelhor(candidatos);
 
-  const margem = diferencaAbs < 2 ? 1.5 : 0.5;
-  const linha = arredondar(Math.max(diferencaAbs - margem, 0.5));
-
-  const confianca = classificarConfianca({
-    amostraMandante: anMandante.amostra,
-    amostraVisitante: anVisitante.amostra,
-    direcaoConvergente,
-    desvioRelativoMaxMandante: anMandante.desvioRelativoMax,
-    desvioRelativoMaxVisitante: anVisitante.desvioRelativoMax,
-    outlierDetectado: anMandante.outlierDetectado || anVisitante.outlierDetectado,
-  });
-
-  return {
+  return montarPalpite({
     mercado: 'Handicap de Escanteios',
-    linha_sugerida: linha,
-    direcao: `${favorito} -${linha}`,
-    confianca,
-    justificativa:
-      `${nomeMandante}: ${anMandante.media} escanteios/jogo em casa (${anMandante.amostra} jogos). ` +
-      `${nomeVisitante}: ${anVisitante.media} escanteios/jogo fora (${anVisitante.amostra} jogos). ` +
-      `Diferença esperada: ${arredondar(diferencaAbs)} a favor de ${favorito} (margem de segurança já aplicada na linha).`,
-    amostra_time_a: anMandante.amostra,
-    amostra_time_b: anVisitante.amostra,
-    outlier_detectado: anMandante.outlierDetectado || anVisitante.outlierDetectado,
-  };
+    direcao: `${favorito} -${melhor.linha}`,
+    linha: melhor.linha,
+    candidato: melhor,
+    nomeMandante, nomeVisitante,
+    textoA: `saldo médio de ${arredondar(mediaA)} escanteios, ${melhor.ladoA.hit}/${melhor.ladoA.n} jogos com margem maior que ${melhor.linha} a favor de quem seria ${mandanteFavorito ? 'favorito' : 'adversário'}`,
+    textoB: `saldo médio de ${arredondar(mediaB)} escanteios, ${melhor.ladoB.hit}/${melhor.ladoB.n} jogos coerentes com essa margem`,
+    meta: { tipo: 'handicap_escanteios', favorito: mandanteFavorito ? 'mandante' : 'visitante', linha: melhor.linha },
+    avisosExtras: ['Escanteios é o mercado mais volátil: só chega em forte com 7+ jogos de cada lado e variância baixa.'],
+  });
 }
 
-// Seção 8.6: dupla chance. Só marca "forte" com gap real de tabela (>5
-// posições ou >10 pts) OU quando o retrospecto de mando dos dois lados
-// concorda com quem a tabela aponta como favorito - senão fica em moderado
-// mesmo com amostra boa.
-function calcularDuplaChance({ jogosMandante, jogosVisitante, linhaMandante, linhaVisitante, nomeMandante, nomeVisitante }) {
-  if (jogosMandante.length === 0 || jogosVisitante.length === 0) return null;
-
-  const aproveitamentoMandante = jogosMandante.filter((j) => j.resultado !== 'D').length / jogosMandante.length;
-  const aproveitamentoVisitante = jogosVisitante.filter((j) => j.resultado !== 'D').length / jogosVisitante.length;
+// Resultado (vitória) e dupla chance. Forte só se houver gap real de tabela
+// (> 5 posições ou > 10 pts) ou retrospecto de mando concordando com a tabela.
+function calcularResultadoEDuplaChance({ jogosMandante, jogosVisitante, linhaMandante, linhaVisitante, nomeMandante, nomeVisitante }) {
+  if (jogosMandante.length === 0 || jogosVisitante.length === 0) return [];
 
   const gapPosicoes = linhaMandante && linhaVisitante ? Math.abs(linhaMandante.posicao - linhaVisitante.posicao) : null;
   const gapPontos = linhaMandante && linhaVisitante ? Math.abs(linhaMandante.pontos - linhaVisitante.pontos) : null;
   const gapDeTabela = (gapPosicoes !== null && gapPosicoes > 5) || (gapPontos !== null && gapPontos > 10);
-
   const favoritoTabela = linhaMandante && linhaVisitante
     ? (linhaMandante.posicao < linhaVisitante.posicao ? 'mandante' : 'visitante')
     : null;
-  const retrospectoConcorda =
-    (aproveitamentoMandante > aproveitamentoVisitante && favoritoTabela === 'mandante') ||
-    (aproveitamentoVisitante > aproveitamentoMandante && favoritoTabela === 'visitante');
 
-  const lado = aproveitamentoMandante >= aproveitamentoVisitante ? 'mandante' : 'visitante';
-  const direcao = lado === 'mandante' ? `${nomeMandante} ou empate` : `empate ou ${nomeVisitante}`;
-  // Convergência geral (pra moderado/fraco) é só uma diferença perceptível de
-  // aproveitamento entre os dois lados - o gap de tabela/retrospecto batendo
-  // com a tabela é um requisito À PARTE, só pra chegar em "forte" (ver abaixo).
-  const direcaoConvergente = Math.abs(aproveitamentoMandante - aproveitamentoVisitante) >= 0.15;
+  const anA = analisarAmostra(jogosMandante.map((j) => j.golsPro));
+  const anB = analisarAmostra(jogosVisitante.map((j) => j.golsPro));
+  const varianciaBaixa = anA.desvioRelativoMax <= 0.5 && anB.desvioRelativoMax <= 0.5;
 
-  const anMandante = analisarAmostra(jogosMandante.map((j) => j.golsPro));
-  const anVisitante = analisarAmostra(jogosVisitante.map((j) => j.golsPro));
-
-  let confianca = classificarConfianca({
-    amostraMandante: jogosMandante.length,
-    amostraVisitante: jogosVisitante.length,
-    direcaoConvergente,
-    desvioRelativoMaxMandante: anMandante.desvioRelativoMax,
-    desvioRelativoMaxVisitante: anVisitante.desvioRelativoMax,
-    outlierDetectado: false,
+  const opcoes = [
+    { grupo: 'resultado', direcao: `Vitória ${nomeMandante}`, lado: 'mandante', tipo: 'vitoria', testeA: (j) => j.resultado === 'V', testeB: (j) => j.resultado === 'D', txtA: 'vitórias em casa', txtB: 'derrotas fora' },
+    { grupo: 'resultado', direcao: `Vitória ${nomeVisitante}`, lado: 'visitante', tipo: 'vitoria', testeA: (j) => j.resultado === 'D', testeB: (j) => j.resultado === 'V', txtA: 'derrotas em casa', txtB: 'vitórias fora' },
+    { grupo: 'dupla', direcao: `${nomeMandante} ou empate`, lado: 'mandante', tipo: 'dupla', testeA: (j) => j.resultado !== 'D', testeB: (j) => j.resultado !== 'V', txtA: 'jogos sem derrota em casa', txtB: 'jogos sem vitória fora' },
+    { grupo: 'dupla', direcao: `empate ou ${nomeVisitante}`, lado: 'visitante', tipo: 'dupla', testeA: (j) => j.resultado !== 'V', testeB: (j) => j.resultado !== 'D', txtA: 'jogos sem vitória em casa', txtB: 'jogos sem derrota fora' },
+  ].map((op) => {
+    const ladoA = { hit: jogosMandante.filter(op.testeA).length, n: jogosMandante.length };
+    const ladoB = { hit: jogosVisitante.filter(op.testeB).length, n: jogosVisitante.length };
+    const avaliacao = classificar({ ladoA, ladoB, outlier: false, varianciaBaixa, ehEscanteios: false });
+    if (avaliacao.confianca === 'forte' && !gapDeTabela && favoritoTabela !== op.lado) {
+      avaliacao.confianca = 'moderado-forte';
+    }
+    return { ...op, ladoA, ladoB, outlier: false, distancia: 0, avaliacao };
   });
-  // Regra explícita da spec: mesmo com tudo "forte" pelos critérios gerais,
-  // só mantém forte se realmente houver gap de tabela ou retrospecto batendo.
-  if (confianca === 'forte' && !gapDeTabela && !retrospectoConcorda) confianca = 'moderado';
 
+  return ['resultado', 'dupla'].map((grupo) => {
+    const melhor = escolherMelhor(opcoes.filter((o) => o.grupo === grupo));
+    const nomeGrupo = grupo === 'resultado' ? 'Resultado Final' : 'Dupla Chance';
+    const avisosExtras = gapDeTabela ? [`Gap de tabela: ${gapPosicoes} posições, ${gapPontos} pts.`] : [];
+    return montarPalpite({
+      mercado: nomeGrupo,
+      direcao: melhor.direcao,
+      linha: null,
+      candidato: melhor,
+      nomeMandante, nomeVisitante,
+      textoA: `${melhor.ladoA.hit}/${melhor.ladoA.n} ${melhor.txtA}`,
+      textoB: `${melhor.ladoB.hit}/${melhor.ladoB.n} ${melhor.txtB}`,
+      meta: { tipo: melhor.tipo, lado: melhor.lado },
+      avisosExtras,
+    });
+  });
+}
+
+// Jogo de pressão (os dois brigando contra o rebaixamento) reduz a confiança
+// de "mais gols" em um nível.
+function ajustarPorContexto(palpite, contextoMandante, contextoVisitante) {
+  const ambosRebaixamento = contextoMandante === 'briga_rebaixamento' && contextoVisitante === 'briga_rebaixamento';
+  const ehMuitosGols = palpite.meta?.tipo === 'total_gols' && palpite.direcao === 'mais de';
+  if (!ambosRebaixamento || !ehMuitosGols) return palpite;
   return {
-    mercado: 'Dupla Chance',
-    linha_sugerida: null,
-    direcao,
-    confianca,
-    justificativa:
-      `${nomeMandante}: ${Math.round(aproveitamentoMandante * 100)}% de jogos sem derrota em casa (${jogosMandante.length}). ` +
-      `${nomeVisitante}: ${Math.round(aproveitamentoVisitante * 100)}% fora (${jogosVisitante.length}).` +
-      (gapDeTabela ? ` Gap de tabela: ${gapPosicoes} posições, ${gapPontos} pts.` : ' Sem gap relevante de tabela.'),
-    amostra_time_a: jogosMandante.length,
-    amostra_time_b: jogosVisitante.length,
-    outlier_detectado: false,
+    ...palpite,
+    confianca: rebaixar(palpite.confianca),
+    avisos: [...palpite.avisos, 'Os dois times brigam contra o rebaixamento (jogo de pressão tem mais variância): confiança rebaixada.'],
   };
 }
 
-// Seção 6: jogo de pressão (os dois brigando contra o rebaixamento) reduz a
-// confiança de "mais gols" em um nível - não vira "menos gols" automático,
-// só menos confiança no "mais".
-function ajustarPorContexto(palpite, contextoMandante, contextoVisitante) {
-  if (!palpite) return palpite;
-  const ambosRebaixamento = contextoMandante === 'briga_rebaixamento' && contextoVisitante === 'briga_rebaixamento';
-  const ehMuitosGols = palpite.mercado === 'Total de Gols' && palpite.direcao === 'mais de';
-  if (!ambosRebaixamento || !ehMuitosGols) return palpite;
+// Redundância (seção 6): mercados que se sobrepõem quase totalmente não
+// podem ser empilhados - vitória e dupla chance do mesmo lado, "menos de N"
+// gols e a faixa que termina perto de N, "ambas sim" e "mais de X gols" etc.
+function saoRedundantes(a, b) {
+  const [ma, mb] = [a.meta, b.meta];
+  const par = (t1, t2) => (ma.tipo === t1 && mb.tipo === t2) || (ma.tipo === t2 && mb.tipo === t1);
+  const escolher = (t) => (ma.tipo === t ? ma : mb);
 
-  const rebaixar = { forte: 'moderado', moderado: 'fraco', fraco: 'fraco' };
+  if (par('vitoria', 'dupla')) return ma.lado === mb.lado;
+  if (par('total_gols', 'faixa_gols')) {
+    const total = escolher('total_gols');
+    const faixa = escolher('faixa_gols');
+    return total.direcao === 'menos de'
+      ? Math.abs(Math.floor(total.linha) - faixa.max) <= 1
+      : Math.abs(Math.ceil(total.linha) - faixa.min) <= 1;
+  }
+  if (par('ambas_marcam', 'gols_time')) {
+    return escolher('ambas_marcam').direcao === 'sim' && escolher('gols_time').direcao === 'mais de' && escolher('gols_time').linha <= 0.5;
+  }
+  if (par('ambas_marcam', 'total_gols')) {
+    const total = escolher('total_gols');
+    return escolher('ambas_marcam').direcao === 'sim' && total.direcao === 'mais de' && total.linha <= 1.5;
+  }
+  return false;
+}
+
+function marcarRedundancias(palpites) {
+  palpites.forEach((p) => {
+    p.redundante_com = palpites
+      .filter((outro) => outro !== p && saoRedundantes(p, outro))
+      .map((outro) => `${outro.mercado} (${outro.direcao}${outro.linha_sugerida != null && !outro.direcao.includes(String(outro.linha_sugerida)) ? ` ${outro.linha_sugerida}` : ''})`);
+  });
+}
+
+// Combinação (seção 8): até 4 mercados moderado-forte ou melhores, sem
+// redundância entre si, todos do MESMO jogo. Só devolve se houver 2+.
+// A probabilidade combinada assume independência (produto) - é só uma
+// referência; mercados do mesmo jogo tendem a se correlacionar.
+function sugerirCombinacao(palpites) {
+  const candidatos = palpites
+    .filter((p) => (p.confianca === 'forte' || p.confianca === 'moderado-forte') && p.odd_justa >= 1.2)
+    .sort((a, b) => NIVEIS.indexOf(b.confianca) - NIVEIS.indexOf(a.confianca) || b.probabilidade_estimada - a.probabilidade_estimada);
+
+  const escolhidos = [];
+  for (const p of candidatos) {
+    if (escolhidos.length >= 4) break;
+    if (escolhidos.some((e) => saoRedundantes(e, p))) continue;
+    escolhidos.push(p);
+  }
+  if (escolhidos.length < 2) return null;
+
+  const prob = escolhidos.reduce((acc, p) => acc * (p.probabilidade_estimada / 100), 1);
   return {
-    ...palpite,
-    confianca: rebaixar[palpite.confianca],
-    justificativa: `${palpite.justificativa} Confiança reduzida: os dois times brigam contra o rebaixamento (jogo de pressão tende a ter mais variância).`,
+    mercados: escolhidos.map((p) => `${p.mercado}: ${p.direcao}${p.linha_sugerida != null && !p.direcao.includes(String(p.linha_sugerida)) ? ` ${p.linha_sugerida}` : ''}`),
+    probabilidade_combinada_estimada: Math.round(prob * 100),
+    odd_justa_combinada: prob > 0 ? arredondar(1 / prob) : null,
+    aviso: 'Probabilidade combinada assume mercados independentes (produto simples); só vale a pena se a odd real da casa pagar mais que a odd justa.',
   };
+}
+
+function limparMeta(palpite) {
+  const { meta, ...resto } = palpite;
+  return resto;
+}
+
+function textoContexto(linha) {
+  if (!linha) return null;
+  return { posicao: linha.posicao, pontos: linha.pontos, faixa: linha.faixa_classificacao ?? null, contexto: contextoDoTime(linha) };
 }
 
 // Orquestração: busca o histórico (só do mando relevante) dos dois times e a
-// tabela, roda os cálculos e devolve o formato da seção 7. Ainda não filtra
-// por confiança na saída principal - devolve `palpites` (forte/moderado, o
-// que deve aparecer na tela) e `palpites_descartados` (fraco, só os nomes,
-// pra quem for validar manualmente conseguir ver o que foi calculado mas
-// ficou de fora e conferir se concorda com o corte).
+// tabela, roda todos os mercados e devolve o formato da seção 10. `palpites`
+// traz só forte/moderado-forte/moderado (o que aparece na tela), ordenados do
+// mais confiável; o que ficou em fraco vai em `palpites_descartados`.
 export async function gerarPalpites(campeonatoId, timeMandanteId, timeVisitanteId, numeroRodada) {
   const [formaMandante, formaVisitante, tabela] = await Promise.all([
     buscarFormaTime(campeonatoId, timeMandanteId, numeroRodada, JOGOS_JANELA, true),
@@ -412,46 +584,74 @@ export async function gerarPalpites(campeonatoId, timeMandanteId, timeVisitanteI
   const jogosVisitante = formaVisitante.jogos;
 
   const avisos = [];
-  if (jogosMandante.length < AMOSTRA_FRACA) {
+  if (jogosMandante.length < AMOSTRA_MINIMA) {
     avisos.push(`Amostra insuficiente de jogos em casa pra ${nomeMandante} (${jogosMandante.length} jogo(s) encontrados).`);
   }
-  if (jogosVisitante.length < AMOSTRA_FRACA) {
+  if (jogosVisitante.length < AMOSTRA_MINIMA) {
     avisos.push(`Amostra insuficiente de jogos fora pra ${nomeVisitante} (${jogosVisitante.length} jogo(s) encontrados).`);
   }
   if (!linhaMandante || !linhaVisitante) avisos.push('Posição na tabela não confirmada pra um dos times.');
   avisos.push('Desfalques não confirmados - contexto de ausências não entra nessa análise (dado_incompleto).');
+  avisos.push('Sem odds na fonte de dados: compare a odd real da casa com a `odd_justa` de cada palpite - só há valor se a odd da casa for maior.');
 
-  const amostraInsuficiente = jogosMandante.length < AMOSTRA_FRACA || jogosVisitante.length < AMOSTRA_FRACA;
-
+  const amostraInsuficiente = jogosMandante.length < AMOSTRA_MINIMA || jogosVisitante.length < AMOSTRA_MINIMA;
   let todos = [];
+  let combinacao = null;
+
   if (!amostraInsuficiente) {
     const contextoMandante = contextoDoTime(linhaMandante);
     const contextoVisitante = contextoDoTime(linhaVisitante);
+    const base = { jogosMandante, jogosVisitante, nomeMandante, nomeVisitante };
 
     todos = [
-      calcularMercadoTotal({ label: 'Total de Gols', jogosMandante, jogosVisitante, campoFavor: 'golsPro', campoContra: 'golsContra', nomeMandante, nomeVisitante }),
-      calcularMercadoTotal({ label: 'Total de Escanteios', jogosMandante, jogosVisitante, campoFavor: 'escanteios', campoContra: 'escanteiosContra', nomeMandante, nomeVisitante }),
-      calcularAmbasMarcam({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }),
-      calcularMercadoTotal({ label: 'Total de Cartões Amarelos', jogosMandante, jogosVisitante, campoFavor: 'cartoesAmarelos', campoContra: 'cartoesAmarelosContra', nomeMandante, nomeVisitante }),
-      calcularMercadoTotal({ label: 'Total de Finalizações', jogosMandante, jogosVisitante, campoFavor: 'finalizacoes', campoContra: 'finalizacoesContra', nomeMandante, nomeVisitante }),
-      calcularMercadoTotal({ label: 'Total de Chutes no Gol', jogosMandante, jogosVisitante, campoFavor: 'chutesNoGol', campoContra: 'chutesNoGolContra', nomeMandante, nomeVisitante }),
-      calcularMercadoTotal({ label: 'Total de Impedimentos', jogosMandante, jogosVisitante, campoFavor: 'impedimentos', campoContra: 'impedimentosContra', nomeMandante, nomeVisitante }),
-      calcularMercadoTotal({ label: 'Total de Faltas', jogosMandante, jogosVisitante, campoFavor: 'faltas', campoContra: 'faltasContra', nomeMandante, nomeVisitante }),
-      calcularGolsTimeIsolado({ jogos: jogosMandante, nomeTime: nomeMandante, comoMandante: true }),
-      calcularGolsTimeIsolado({ jogos: jogosVisitante, nomeTime: nomeVisitante, comoMandante: false }),
-      calcularHandicapEscanteios({ jogosMandante, jogosVisitante, nomeMandante, nomeVisitante }),
-      calcularDuplaChance({ jogosMandante, jogosVisitante, linhaMandante, linhaVisitante, nomeMandante, nomeVisitante }),
+      ...Object.keys(ROTULOS).map((campo) => calcularMercadoTotal({ campo, ...base })),
+      calcularFaixaGols(base),
+      calcularAmbasMarcam(base),
+      calcularGolsTime({ jogosTime: jogosMandante, jogosAdversario: jogosVisitante, nomeTime: nomeMandante, nomeAdversario: nomeVisitante, timeEhMandante: true }),
+      calcularGolsTime({ jogosTime: jogosVisitante, jogosAdversario: jogosMandante, nomeTime: nomeVisitante, nomeAdversario: nomeMandante, timeEhMandante: false }),
+      calcularHandicapEscanteios(base),
+      ...calcularResultadoEDuplaChance({ ...base, linhaMandante, linhaVisitante }),
     ]
       .filter(Boolean)
       .map((p) => ajustarPorContexto(p, contextoMandante, contextoVisitante));
+
+    const exibidos = todos.filter((p) => p.confianca !== 'fraco');
+    marcarRedundancias(exibidos);
+    combinacao = sugerirCombinacao(exibidos);
   } else {
     avisos.push('Amostra insuficiente pra classificar qualquer mercado - nenhum palpite gerado.');
   }
 
-  return {
+  const exibidos = todos
+    .filter((p) => p.confianca !== 'fraco')
+    .sort((a, b) => NIVEIS.indexOf(b.confianca) - NIVEIS.indexOf(a.confianca) || b.probabilidade_estimada - a.probabilidade_estimada);
+
+  const resultado = {
     confronto: `${nomeMandante} x ${nomeVisitante}`,
-    palpites: todos.filter((p) => p.confianca === 'forte' || p.confianca === 'moderado'),
-    palpites_descartados: todos.filter((p) => p.confianca === 'fraco').map((p) => `${p.mercado} (${p.direcao})`),
+    mando_confirmado: true,
+    janela_jogos: { mandante_em_casa: jogosMandante.length, visitante_fora: jogosVisitante.length },
+    contexto: { mandante: textoContexto(linhaMandante), visitante: textoContexto(linhaVisitante) },
+    palpites: exibidos.map(limparMeta),
+    combinacao_sugerida: combinacao,
+    palpites_descartados: todos
+      .filter((p) => p.confianca === 'fraco')
+      .map((p) => `${p.mercado} (${p.direcao}${p.linha_sugerida != null && !p.direcao.includes(String(p.linha_sugerida)) ? ` ${p.linha_sugerida}` : ''})${p.contradicao_detectada ? ' - contradição' : ''}`),
     avisos,
   };
+
+  // Auditoria (seção 12): guarda o que foi previsto pra jogos ainda não
+  // disputados. Falha de gravação nunca deve derrubar a análise.
+  try {
+    const fixtures = await buscarTodasFixtures(campeonatoId);
+    const fixture = fixtures.find(
+      (f) => f.homeTeamId === timeMandanteId && f.awayTeamId === timeVisitanteId && Number(f.matchRound) === Number(numeroRodada),
+    );
+    if (fixture && fixture.matchStatus !== 'FINISHED') {
+      registrarPalpites({ campeonatoId, fixtureId: fixture.id, confronto: resultado.confronto, palpites: exibidos });
+    }
+  } catch (err) {
+    console.warn(`[auditoria] não registrou palpites: ${err.message}`);
+  }
+
+  return resultado;
 }

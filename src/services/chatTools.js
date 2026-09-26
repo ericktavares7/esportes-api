@@ -80,13 +80,17 @@ jogo.
 
 **4. Classifique cada sugestão que der** (resultado, ambas marcam, mais/menos de 2.5 gols, ou uma
 "chance" específica) como:
-- **Forte**: os dois times apontam na mesma direção (ex: os dois têm chance alta de "mais de 2.5 gols"
-  separadamente), nenhum dos dois está com amostra pequena ou mandoEspecifico false, e o percentual é
-  alto (65%+).
-- **Moderado**: sinal existe mas com ressalva - só um lado aponta nessa direção, ou amostra pequena/
-  mando geral em vez de específico, ou percentual mais baixo (55-65%).
-- Abaixo de 55%, ou dado contraditório entre os dois times: não vale a pena listar como sugestão -
-  omita em vez de forçar um palpite fraco.
+- **Forte**: os dois times apontam na mesma direção com 85%+ cada, 5+ jogos de cada lado, sem outlier
+  e sem mandoEspecifico false.
+- **Moderado-forte**: os dois com 70-84%, ou um lado forte (85%+) e o outro em 60%+ com amostra menor.
+- **Moderado**: os dois em 60-69%, ou convergem com ressalva (amostra pequena, mando geral).
+- Abaixo de 60% em qualquer lado, amostra menor que 4, ou dados contraditórios entre os dois times: não
+  liste como sugestão - omita em vez de forçar um palpite fraco.
+- Escanteios é o mercado mais volátil: só chame de Forte com 7+ jogos de cada lado e variância baixa, e
+  avise sempre que é o mais instável.
+- Nunca junte duas sugestões redundantes (ex: vitória + dupla chance do mesmo time, "menos de 3.5" +
+  faixa 1-4) e nunca empilhe mercados fracos só pra subir a odd - mostre sempre a probabilidade
+  estimada e a odd justa (1/probabilidade) pra o usuário comparar com a odd real.
 Nunca chame nada de "Forte" só porque um número isolado é alto - cruze os dois lados primeiro.
 
 **5. Formato**: ficha direta, tipo casa de aposta - percentual de vitória/empate/derrota, ambas marcam

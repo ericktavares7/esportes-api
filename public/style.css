@@ -1926,6 +1926,29 @@ main {
   border-left-color: var(--yellow);
 }
 
+.palpite-motor-moderado-forte {
+  border-left-color: #7fcf8a;
+}
+
+.palpite-motor-combinacao {
+  margin-top: 10px;
+  border-left-color: var(--accent);
+}
+
+.palpite-motor-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.palpite-motor-aviso {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--yellow);
+}
+
 .palpite-motor-cabecalho {
   display: flex;
   justify-content: space-between;
@@ -1943,6 +1966,7 @@ main {
   font-size: 11px;
   font-weight: 700;
   text-transform: capitalize;
+  white-space: nowrap;
   padding: 2px 8px;
   border-radius: 999px;
   flex-shrink: 0;
@@ -1951,6 +1975,11 @@ main {
 .palpite-motor-selo-forte {
   background: var(--accent-dark);
   color: var(--accent);
+}
+
+.palpite-motor-selo-moderado-forte {
+  background: rgba(127, 207, 138, 0.16);
+  color: #7fcf8a;
 }
 
 .palpite-motor-selo-moderado {

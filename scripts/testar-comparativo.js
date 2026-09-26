@@ -12,7 +12,7 @@ import { gerarPalpites } from '../src/services/motorPalpites.js';
 
 const CAMPEONATO_ID = process.env.CAMPEONATO_TESTE ?? CAMPEONATO_SERIE_B_ID;
 const MAX_CONFRONTOS = 3;
-const JOGOS_JANELA = 7; // mesmo valor usado dentro do motor - só pra reexibir os jogos que ele usou
+const JOGOS_JANELA = 8; // mesmo valor do motor
 
 function imprimirJogos(nomeTime, mando, jogos) {
   console.log(`\n${nomeTime} (${mando}) - ${jogos.length} jogo(s) usados:`);
